@@ -82,6 +82,7 @@ class MrHouse:
             length_scale=cfg.tts.length_scale,
             noise_scale=cfg.tts.noise_scale,
             noise_w=cfg.tts.noise_w,
+            expressiveness=cfg.tts.expressiveness,
             sentence_silence=cfg.tts.sentence_silence,
         ) if cfg.tts.enabled else None
         out_sr = self.tts.sample_rate if (self.tts and self.tts.available) else cfg.audio.output_sample_rate

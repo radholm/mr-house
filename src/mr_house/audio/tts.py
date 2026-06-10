@@ -14,6 +14,7 @@ from there.
 from __future__ import annotations
 
 import logging
+import random
 from pathlib import Path
 from typing import Optional
 
@@ -38,13 +39,17 @@ class TextToSpeech:
         self,
         voice_path: str,
         length_scale: float = 1.0,
-        noise_scale: float = 0.667,
-        noise_w: float = 0.8,
+        noise_scale: float = 0.85,
+        noise_w: float = 0.95,
+        expressiveness: float = 0.12,
         sentence_silence: float = 0.15,
     ) -> None:
         self.length_scale = length_scale
         self.noise_scale = noise_scale
         self.noise_w = noise_w
+        # How much to randomly vary prosody per sentence so a multi-sentence
+        # reply doesn't come out flat/monotone. 0 disables the jitter.
+        self.expressiveness = max(0.0, expressiveness)
         self.sentence_silence = sentence_silence  # kept for API compatibility
         self.sample_rate = 22050
         self._voice = None
@@ -78,13 +83,44 @@ class TextToSpeech:
     def available(self) -> bool:
         return self._voice is not None
 
+    def _config_for(self, text: str):
+        """A SynthesisConfig for *text*, jittered for more expressive delivery.
+
+        Each call nudges pitch/prosody (``noise_scale``), cadence
+        (``noise_w_scale``) and pace (``length_scale``) by a small random amount
+        so consecutive sentences in a reply don't sound identically flat. The
+        jitter is gentle and clamped to keep the voice recognisable.
+        """
+        if self.expressiveness <= 0.0:
+            return self._syn_config
+
+        j = self.expressiveness
+        # Pitch/prosody variability — the biggest lever against monotone.
+        noise_scale = self.noise_scale * (1.0 + random.uniform(-j, j))
+        # Cadence/rhythm variability.
+        noise_w = self.noise_w * (1.0 + random.uniform(-j, j))
+        # Pace — vary a bit less so timing stays natural.
+        length_scale = self.length_scale * (1.0 + random.uniform(-j, j) * 0.5)
+
+        noise_scale = float(np.clip(noise_scale, 0.3, 1.2))
+        noise_w = float(np.clip(noise_w, 0.4, 1.4))
+        length_scale = float(np.clip(length_scale, 0.8, 1.3))
+
+        return SynthesisConfig(
+            length_scale=length_scale,
+            noise_scale=noise_scale,
+            noise_w_scale=noise_w,
+            normalize_audio=True,
+        )
+
     def synthesize(self, text: str) -> Optional[np.ndarray]:
         """Synthesize *text* to a float32 [-1, 1] mono waveform."""
         if self._voice is None or not text.strip():
             return None
         try:
             chunks: list[np.ndarray] = []
-            for audio_chunk in self._voice.synthesize(text, self._syn_config):
+            syn_config = self._config_for(text)
+            for audio_chunk in self._voice.synthesize(text, syn_config):
                 arr = np.asarray(audio_chunk.audio_int16_array, dtype=np.int16)
                 if arr.size:
                     chunks.append(arr)

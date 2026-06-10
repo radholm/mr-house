@@ -60,9 +60,14 @@ tts:
   engine: "piper"
   # Path to a Piper voice (.onnx). The matching .onnx.json must sit beside it.
   voice: "src/mr_house/assets/voices/en_US-ryan-high.onnx"
-  length_scale: 0.95        # <1 = faster speech
-  noise_scale: 0.667
-  noise_w: 0.8
+  length_scale: 1.0         # <1 = faster speech; ~1.0 reads more deliberate/natural
+  # Higher noise_scale = more pitch/prosody variation (less monotone, more emotion).
+  noise_scale: 0.85
+  # Higher noise_w = more varied phoneme timing/cadence (less mechanical rhythm).
+  noise_w: 0.95
+  # Per-sentence random variation added to the above so consecutive sentences
+  # aren't delivered with identical, flat prosody. 0 disables the jitter.
+  expressiveness: 0.12
   sentence_silence: 0.15    # seconds of silence between sentences
 
 # --------------------------------------------------------------- voice FX
@@ -76,7 +81,7 @@ voice_fx:
     - [200, -2.0, 0.7]
     - [2500, 3.0, 1.0]
     - [5000, 1.5, 1.2]
-  distortion_db: 4.0        # subtle radio grit; 0 to disable
+  distortion_db: 2.5        # subtle radio grit; 0 to disable
   reverb:
     room_size: 0.45         # bigger = longer, roomier tail
     damping: 0.5

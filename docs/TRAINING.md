@@ -65,11 +65,16 @@ clean path is **WSL2 Ubuntu** with your NVIDIA GPU.
 > **Do you actually need WSL?** No — it's just the smoothest *local* option
 > because it matches Piper's documented Linux environment. Alternatives:
 >
-> - **Native Windows (no WSL).** Works, but fiddlier: install **Visual Studio
->   Build Tools (MSVC)** to compile the Cython `monotonic_align` extension,
->   install **espeak-ng for Windows** and add it to `PATH`, and replace the bash
->   `build_monotonic_align.sh` with the equivalent
->   `python setup.py build_ext --inplace` inside the `monotonic_align` folder.
+> - **Native Windows (no WSL).** Works, but fiddlier:
+>   1. Install **Visual Studio Build Tools (MSVC)** with the "Desktop
+>      development with C++" workload (the C/C++ compiler).
+>   2. Install **espeak-ng for Windows** and add it to `PATH`.
+>   3. Install the Cython build deps in the Piper venv:
+>      `pip install scikit-build cython cmake ninja` — without `scikit-build`
+>      the build fails with `ModuleNotFoundError: No module named 'skbuild'`.
+>   4. Replace the bash `build_monotonic_align.sh` with the equivalent
+>      `python setup.py build_ext --inplace`.
+>
 >   PyTorch + CUDA run natively on Windows.
 > - **Cloud GPU (no WSL, no local GPU needed)** — often the *easiest overall*,
 >   especially without a strong local NVIDIA card. Rent a Linux GPU box (RunPod,

@@ -34,7 +34,13 @@ except Exception as exc:  # pragma: no cover
 # anchoring on end-of-buffer ($) during streaming, otherwise a trailing "13."
 # at a chunk boundary is mistaken for a sentence end and splits decimals like
 # "13.9". The final partial sentence is emitted by SentenceChunker.flush().
-_SENTENCE_END = re.compile(r"([.!?…]+)(\s+)")
+#
+# Ellipses are deliberately NOT treated as sentence boundaries: a trailing
+# "..." (or "…") usually marks a *continuation*, so splitting there produces
+# fragments like "I do take care of a few..." / "proteges, shall we say." that
+# make the TTS sound chopped. We only break on a real terminator (! ? or a
+# single '.'), ignoring dots that are part of an ellipsis and the '…' char.
+_SENTENCE_END = re.compile(r"([!?]+|(?<!\.)\.(?!\.))(\s+)")
 
 
 class SentenceChunker:
