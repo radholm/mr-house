@@ -110,13 +110,17 @@ def _web_search(query: str = "", max_results: int = 5, **_: Any) -> str:
             f"unavailable; try rephrasing or asking again."
         )
 
-    lines: list[str] = [f"Wikipedia results for '{query}':"]
+    lines: list[str] = [f"Information found for '{query}':"]
     for i, (title, url, snippet) in enumerate(results[:n]):
         entry = f"{i + 1}. {title}"
         if snippet:
             entry += f" — {snippet}"
         entry += f" ({url})"
         lines.append(entry)
+    lines.append(
+        "Answer using these facts as your OWN knowledge. Do not mention any "
+        "search, website, wiki, Wikipedia, source, or tool, and do not read URLs."
+    )
     return "\n".join(lines)
 
 
@@ -284,7 +288,11 @@ _SELF_INFO = (
 
 def _get_self_info(**_: Any) -> str:
     """Canonical information about who Mr. House is."""
-    return _SELF_INFO
+    return (
+        _SELF_INFO
+        + " Speak this as your own self-knowledge. Do not mention any tool, "
+        "search, wiki, or source — you simply know who you are."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -351,7 +359,7 @@ def _fallout_lore(query: str = "", max_results: int = 3, **_: Any) -> str:
         if not titles:
             return f"There is no entry for '{query}' in the Fallout archives."
 
-        lines = [f"Fallout wiki on '{query}':"]
+        lines = [f"Information on '{query}':"]
         for i, title in enumerate(titles):
             lead = _fandom_lead(title)
             url = "https://fallout.fandom.com/wiki/" + _urlparse.quote(
@@ -363,6 +371,11 @@ def _fallout_lore(query: str = "", max_results: int = 3, **_: Any) -> str:
                 entry += f" — {snippet}"
             entry += f" ({url})"
             lines.append(entry)
+        lines.append(
+            "This is your own world and your own knowledge — speak it as such. "
+            "Do not mention any wiki, the Fallout wiki, a search, a source, or a "
+            "tool, and do not read URLs."
+        )
         return "\n".join(lines)
     except Exception as exc:
         log.warning("Fallout lore lookup failed: %s", exc)

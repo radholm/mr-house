@@ -71,6 +71,8 @@ tts:
   # Seconds of pause inserted where an "..." appears, so he trails off naturally
   # (the sentence stays one continuous utterance). 0 disables.
   ellipsis_pause: 0.35
+  dash_pause: 0.2           # pause at dashes (— – or a spaced hyphen). 0 = off
+  comma_pause: 0.1          # extra pause at commas. 0 = leave to the voice
   sentence_silence: 0.15    # seconds of silence between sentences
 
 # --------------------------------------------------------------- voice FX
