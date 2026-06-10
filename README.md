@@ -92,7 +92,8 @@ pip install -r requirements.txt
 
 - **TTS voice**: download a Piper voice (`.onnx` + `.onnx.json`) into
   `src/mr_house/assets/voices/` and point `config.yaml` at it. Grab one from
-  <https://github.com/rhasspy/piper/blob/master/VOICES.md>.
+  <https://github.com/rhasspy/piper/blob/master/VOICES.md>, or **train your own
+  custom voice** from a recording — see [`docs/TRAINING.md`](docs/TRAINING.md).
 - **Portrait**: drop your image at `src/mr_house/assets/house.png` (or change the
   path in `config.yaml`).
 
