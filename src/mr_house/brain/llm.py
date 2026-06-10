@@ -177,10 +177,13 @@ class Brain:
         use_tools = _likely_needs_tools(user_text) and (
             self.local_tools.available or (self.tools and self.tools.available)
         )
-        tool_schema = self._all_tool_schemas() if use_tools else None
-        tool_names = (
-            {t["function"]["name"] for t in tool_schema} if tool_schema else set()
-        )
+        # Always know every tool name, even on turns where we don't OFFER tools:
+        # the system prompt lists the tools, so a small model sometimes "speaks"
+        # a tool call as text instead of using the tool API. We detect that and
+        # execute it rather than reading it aloud.
+        all_schemas = self._all_tool_schemas()
+        tool_names = {t["function"]["name"] for t in all_schemas}
+        tool_schema = all_schemas if use_tools else None
         if use_tools:
             log.info("Tools enabled: %s", sorted(tool_names))
 
@@ -235,9 +238,8 @@ class Brain:
                     if speak_suppressed is None:
                         lead = collected_content.lstrip()
                         if lead:
-                            speak_suppressed = (
-                                use_tools
-                                and _looks_like_tool_call_text(lead, tool_names)
+                            speak_suppressed = _looks_like_tool_call_text(
+                                lead, tool_names
                             )
                     if speak_suppressed is False:
                         if not first_token_sent and on_first_token:
@@ -330,10 +332,12 @@ _TOOL_HINTS = (
     "who is", "who was", "what is", "what are", "when is", "when was",
     "where is", "how many", "how much", "how old", "capital of", "founder of",
     "ceo of", "born", "died", "happened", "find out", "search", "look it up",
-    # Questions about Mr. House himself -> get_self_info.
-    "who are you", "what are you", "your name", "about yourself", "about you",
-    "your history", "your past", "your story", "your goal", "your goals",
-    "tell me about you", "introduce yourself", "what do you want",
+    # Questions about Mr. House himself -> get_self_info / fallout_lore.
+    "who are you", "what are you", "who're you", "your name", "yourself",
+    "about yourself", "about you", "your history", "your past", "your story",
+    "your goal", "your goals", "tell me about you", "introduce yourself",
+    "what do you want", "are you", "your motive", "your plan", "mr. house",
+    "mr house", "robert house",
     # Fallout universe lore -> fallout_lore.
     "fallout", "new vegas", "mojave", "wasteland", "ncr", "new california",
     "caesar", "legion", "the strip", "lucky 38", "securitron", "courier",
@@ -388,6 +392,11 @@ def _looks_like_tool_call_text(text: str, tool_names: set[str]) -> bool:
         return True
     m = _NAME_CALL_PREFIX.match(s)
     if m and m.group(1) in tool_names:
+        return True
+    # A bare tool name leading the content, e.g. "get_self_info" or
+    # "fallout_lore Mr. House". Tool names never start a normal sentence.
+    first = re.match(r"([A-Za-z_]\w*)", s)
+    if first and first.group(1) in tool_names:
         return True
     # e.g. mentions a tool name immediately with JSON-ish args nearby
     for name in tool_names:
@@ -496,6 +505,14 @@ def _extract_text_tool_calls(text: str, tool_names: set[str]) -> list[dict[str, 
         if tool_names and name not in tool_names:
             continue
         calls.append({"name": name, "arguments": _parse_call_args(m.group(2))})
+    if calls:
+        return calls
+    # 3) A bare tool name leading the text, e.g. "get_self_info" or
+    #    "fallout_lore Mr. House" (any args after it are parsed if present).
+    s = text.strip()
+    m = re.match(r"([A-Za-z_]\w*)", s)
+    if m and m.group(1) in tool_names:
+        return [{"name": m.group(1), "arguments": _parse_call_args(s[m.end():])}]
     return calls
 
 
