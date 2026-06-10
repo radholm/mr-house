@@ -205,8 +205,10 @@ def _get_weather(location: str = "", **_: Any) -> str:
             return f"I couldn't find a place called {location}."
         place = results[0]
         lat, lon = place["latitude"], place["longitude"]
+        # City + country only — concise and natural for speech (skip the verbose
+        # admin region like "Stockholm County" / "Île-de-France Region").
         nice = ", ".join(
-            p for p in [place.get("name"), place.get("admin1"), place.get("country")] if p
+            p for p in [place.get("name"), place.get("country")] if p
         )
 
         # 2) current conditions
@@ -226,13 +228,28 @@ def _get_weather(location: str = "", **_: Any) -> str:
             return f"I couldn't retrieve current conditions for {nice}."
         code = int(cur.get("weather_code", -1))
         desc = _WMO.get(code, "unclear conditions")
-        temp = cur.get("temperature_2m")
-        feels = cur.get("apparent_temperature")
-        hum = cur.get("relative_humidity_2m")
-        wind = cur.get("wind_speed_10m")
+
+        def _round(v):
+            try:
+                return int(round(float(v)))
+            except (TypeError, ValueError):
+                return v
+
+        temp = _round(cur.get("temperature_2m"))
+        feels = _round(cur.get("apparent_temperature"))
+        hum = _round(cur.get("relative_humidity_2m"))
+        wind = _round(cur.get("wind_speed_10m"))
+        # Explicit, spoken-friendly data plus a directive so the model always
+        # relays the actual numbers instead of vaguely saying "it's pleasant".
         return (
-            f"Current weather in {nice}: {desc}, {temp} degrees Celsius "
-            f"(feels like {feels}), humidity {hum} percent, wind {wind} kilometers per hour."
+            f"Weather data for {nice} — "
+            f"conditions: {desc}; "
+            f"temperature: {temp} degrees Celsius; "
+            f"feels like: {feels} degrees; "
+            f"humidity: {hum} percent; "
+            f"wind: {wind} kilometers per hour. "
+            f"Tell the user the place, the temperature in degrees, and the "
+            f"conditions, stating these exact numbers."
         )
     except Exception as exc:
         log.error("Weather lookup failed: %s", exc)
