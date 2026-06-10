@@ -5,6 +5,26 @@
 # models, and (via winget) installs uv and Ollama, then pulls the LLM model.
 
 $ErrorActionPreference = "Stop"
+
+# By default, under ErrorActionPreference=Stop, PowerShell turns *anything a
+# native program writes to stderr* (even harmless warnings/progress) into a
+# terminating "NativeCommandError". Disable that here:
+#  - PS 7.3+: opt out via the preference variable.
+#  - All versions: run native commands through Invoke-Native (below), which
+#    temporarily relaxes ErrorActionPreference so stderr can't kill the script.
+if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
+function Invoke-Native {
+    # Run a native command without letting its stderr/exit code throw.
+    # Check $LASTEXITCODE afterwards for real failures.
+    param([Parameter(Mandatory)][scriptblock]$Cmd)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Cmd } finally { $ErrorActionPreference = $old }
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -15,11 +35,12 @@ function Find-Python {
     foreach ($cand in @("py -3.13", "py -3.12", "py -3.11", "py -3.10", "python", "py -3")) {
         $parts = $cand.Split(" ")
         $exe = $parts[0]
-        $args = $parts[1..($parts.Length - 1)]
+        # Args after the exe (empty for a bare "python"; avoids the 1..0 range bug).
+        $rest = if ($parts.Length -gt 1) { $parts[1..($parts.Length - 1)] } else { @() }
         try {
-            $ver = & $exe @args -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+            $ver = & $exe @rest -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
             if ($LASTEXITCODE -eq 0 -and [version]$ver -ge [version]"3.10") {
-                return ,($exe, $args)
+                return ,($exe, $rest)
             }
         } catch { }
     }
@@ -35,10 +56,20 @@ $pyExe = $py[0]; $pyArgs = $py[1]
 Write-Host "==> Using interpreter: $pyExe $pyArgs"
 
 # --- 1. system deps via winget --------------------------------------------
+function Install-IfMissing {
+    # Install a winget package only when its command isn't already on PATH.
+    param([string]$Command, [string]$WingetId, [string]$Label)
+    if (Get-Command $Command -ErrorAction SilentlyContinue) {
+        Write-Host "==> $Label already installed; skipping."
+        return
+    }
+    Write-Host "==> Installing $Label via winget..."
+    Invoke-Native { winget install --id $WingetId --accept-source-agreements --accept-package-agreements -e | Out-Null }
+}
+
 if (Get-Command winget -ErrorAction SilentlyContinue) {
-    Write-Host "==> Installing uv and Ollama via winget (skip if already present)"
-    winget install --id astral-sh.uv         --accept-source-agreements --accept-package-agreements -e 2>$null | Out-Null
-    winget install --id Ollama.Ollama         --accept-source-agreements --accept-package-agreements -e 2>$null | Out-Null
+    Install-IfMissing -Command "uv"     -WingetId "astral-sh.uv"  -Label "uv"
+    Install-IfMissing -Command "ollama" -WingetId "Ollama.Ollama" -Label "Ollama"
 } else {
     Write-Host "!! winget not found. Install uv (https://astral.sh/uv) and Ollama (https://ollama.com) manually."
 }
@@ -46,15 +77,20 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 # --- 2. python venv + deps -------------------------------------------------
 Write-Host "==> Creating virtualenv (.venv)"
 if (Test-Path ".venv") { Remove-Item -Recurse -Force ".venv" }
-& $pyExe @pyArgs -m venv .venv
+Invoke-Native { & $pyExe @pyArgs -m venv .venv }
+if ($LASTEXITCODE -ne 0) { Write-Host "!! Failed to create venv." -ForegroundColor Red; exit 1 }
+
 $venvPy = Join-Path $root ".venv\Scripts\python.exe"
-& $venvPy -m pip install --upgrade pip
+Invoke-Native { & $venvPy -m pip install --upgrade pip }
 Write-Host "==> Installing Python requirements (this can take a few minutes)"
-& $venvPy -m pip install -r requirements.txt
+Invoke-Native { & $venvPy -m pip install -r requirements.txt }
+if ($LASTEXITCODE -ne 0) { Write-Host "!! pip install failed. See output above." -ForegroundColor Red; exit 1 }
 
 # --- 3. openWakeWord base models ------------------------------------------
 Write-Host "==> Downloading openWakeWord base models"
-& $venvPy -c "import openwakeword; openwakeword.utils.download_models(); print('   ok')" 2>$null
+Invoke-Native { & $venvPy -c "import openwakeword; openwakeword.utils.download_models()" }
+if ($LASTEXITCODE -eq 0) { Write-Host "   ok" }
+else { Write-Host "   (skipped; models will download on first run)" }
 
 # --- 4. Piper voice --------------------------------------------------------
 $voiceDir = Join-Path $root "src\mr_house\assets\voices"
@@ -73,7 +109,8 @@ if (-not (Test-Path $onnx)) {
 # --- 5. Ollama model -------------------------------------------------------
 if (Get-Command ollama -ErrorAction SilentlyContinue) {
     Write-Host "==> Pulling Ollama model (llama3.2:3b). Ollama runs in the background on Windows."
-    try { ollama pull llama3.2:3b } catch { Write-Host "   pull failed; start Ollama, then 'ollama pull llama3.2:3b'." }
+    Invoke-Native { ollama pull llama3.2:3b }
+    if ($LASTEXITCODE -ne 0) { Write-Host "   pull failed; start Ollama, then 'ollama pull llama3.2:3b'." }
 } else {
     Write-Host "   Ollama not on PATH yet. Open a new terminal (or sign out/in), then 'ollama pull llama3.2:3b'."
 }
