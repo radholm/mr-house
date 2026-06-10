@@ -76,6 +76,8 @@ class CRTDisplay:
         self._glitch_provider: Optional[Callable[[], bool]] = None
         self._stop = False
         self._smoothed_glitch = 0.0
+        self._render_w = cfg.width
+        self._render_h = cfg.height
 
     # ---------------------------------------------------------------- setup
     def _load_surface(self) -> "pygame.Surface":
@@ -85,15 +87,44 @@ class CRTDisplay:
             p = self.repo_root / p
         if p.exists():
             try:
-                return pygame.image.load(str(p)).convert_alpha()
+                # No .convert_alpha() here: this is loaded BEFORE a display mode
+                # exists (we need the image size to pick the window size), and
+                # convert_alpha() requires an active video mode.
+                return pygame.image.load(str(p))
             except Exception as exc:
                 log.error("Failed to load image %s: %s", p, exc)
         log.warning("Portrait %s missing; using placeholder.", p)
         return _placeholder_image(self.cfg.width, self.cfg.height)
 
+    def _fit_to_aspect(self, img_w: int, img_h: int) -> tuple[int, int]:
+        """Pick a window size matching the image's aspect ratio, fitting the
+        configured width/height as a bounding box."""
+        if img_w <= 0 or img_h <= 0:
+            return self.cfg.width, self.cfg.height
+        aspect = img_w / img_h
+        max_w, max_h = self.cfg.width, self.cfg.height
+        # Start from the configured width, then clamp by height.
+        render_w = max_w
+        render_h = max(1, round(render_w / aspect))
+        if render_h > max_h:
+            render_h = max_h
+            render_w = max(1, round(render_h * aspect))
+        return int(render_w), int(render_h)
+
     def _setup(self) -> None:
         pygame.init()
         pygame.display.set_caption("Mr. House")
+
+        # Load the portrait first so we can size the window to its aspect ratio.
+        surface = self._load_surface()
+        img_w, img_h = surface.get_size()
+        if self.cfg.fullscreen:
+            # In fullscreen we can't choose the window dimensions; render at the
+            # configured size (the shader still fills the screen).
+            render_w, render_h = self.cfg.width, self.cfg.height
+        else:
+            render_w, render_h = self._fit_to_aspect(img_w, img_h)
+        self._render_w, self._render_h = render_w, render_h
 
         # macOS only exposes OpenGL 3.3+ via a *forward-compatible Core* profile,
         # and these attributes MUST be set before create the window, otherwise
@@ -117,7 +148,7 @@ class CRTDisplay:
         if self.cfg.fullscreen:
             flags |= pygame.FULLSCREEN
         self._screen = pygame.display.set_mode(
-            (self.cfg.width, self.cfg.height), flags
+            (render_w, render_h), flags
         )
         self._ctx = moderngl.create_context(require=330)
 
@@ -130,10 +161,11 @@ class CRTDisplay:
             self._prog, [(vbo, "2f 2f", "in_vert", "in_uv")]
         )
 
-        surface = self._load_surface()
-        surface = pygame.transform.smoothscale(surface, (self.cfg.width, self.cfg.height))
+        # Scale the portrait to the render size (same aspect ratio, so no
+        # distortion) and upload it as the texture.
+        surface = pygame.transform.smoothscale(surface, (render_w, render_h))
         rgb = pygame.image.tostring(surface, "RGB", False)
-        self._tex = self._ctx.texture((self.cfg.width, self.cfg.height), 3, rgb)
+        self._tex = self._ctx.texture((render_w, render_h), 3, rgb)
         self._tex.build_mipmaps()
         self._tex.repeat_x = False
         self._tex.repeat_y = False

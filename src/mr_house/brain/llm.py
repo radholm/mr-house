@@ -148,6 +148,8 @@ class Brain:
     def _options(self) -> dict[str, Any]:
         return {
             "temperature": self.cfg.temperature,
+            "top_p": getattr(self.cfg, "top_p", 0.95),
+            "repeat_penalty": getattr(self.cfg, "repeat_penalty", 1.15),
             "num_ctx": self.cfg.num_ctx,
         }
 
@@ -182,17 +184,18 @@ class Brain:
         chunker = SentenceChunker()
         first_token_sent = False
         full_answer: list[str] = []
+        tools_used = False
 
-        max_iter = max(1, self.cfg.max_tool_iterations)
+        max_iter = max(2 if use_tools else 1, self.cfg.max_tool_iterations)
         for i in range(max_iter):
             collected_content = ""
             tool_calls: list[dict[str, Any]] = []
 
-            # On the final allowed pass, withhold tools so the model is FORCED to
-            # answer from the tool results it already has, instead of calling a
-            # tool again and ending the loop with nothing to say. Small models
-            # otherwise re-search every turn and never produce a spoken answer.
-            offer_tools = tool_schema if (max_iter == 1 or i < max_iter - 1) else None
+            # Offer tools only until the model has run a tool round once. After
+            # that we withhold them so it is FORCED to answer from the results it
+            # already has, instead of re-searching every turn and ending the loop
+            # with nothing to say (the cause of "sometimes he doesn't answer").
+            offer_tools = tool_schema if not tools_used else None
 
             try:
                 stream = self._client.chat(
@@ -227,6 +230,7 @@ class Brain:
 
             # If the model asked for tools, run them and loop again.
             if tool_calls and not collected_content.strip():
+                tools_used = True
                 messages.append({
                     "role": "assistant",
                     "content": "",

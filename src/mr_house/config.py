@@ -115,10 +115,12 @@ class BrainConfig:
     provider: str = "ollama"
     model: str = "llama3.2:3b"
     host: str = "http://localhost:11434"
-    temperature: float = 0.7
+    temperature: float = 0.95
+    top_p: float = 0.95
+    repeat_penalty: float = 1.15
     max_history_turns: int = 12
     num_ctx: int = 4096
-    filler_after_ms: int = 600
+    filler_after_ms: int = 450
     max_tool_iterations: int = 4
     persist_memory: bool = True
     memory_file: str = "data/memory.json"

@@ -1,17 +1,14 @@
-"""Built-in ('local') tools that run in-process, alongside MCP tools.
+"""Built-in ('local') tools that run in-process.
 
-The generic MCP ``fetch`` server can only download a URL you hand it — it can't
-*search* — so a small model trying to answer "what's the weather?" just invents a
-URL and fails. These local tools give Mr. House real, reliable capabilities with
-no API keys required.
+These give Mr. House real, reliable capabilities with no API keys required.
 
 Currently:
-  * ``web_search`` — search the web (DuckDuckGo) and return the top results.
+  * ``web_search`` — look up factual information on Wikipedia.
   * ``get_weather`` — current conditions for a place, via the free Open-Meteo API.
   * ``get_time``    — current local date/time.
 
 Each tool exposes an OpenAI/Ollama function schema and a plain-text result, so it
-plugs into the same tool-calling loop as the MCP tools.
+plugs into the same tool-calling loop as the brain.
 """
 
 from __future__ import annotations
@@ -31,103 +28,98 @@ except Exception:  # pragma: no cover
     requests = None
 
 
-# Common desktop UA — DuckDuckGo returns an empty/blocked page to clients that
-# don't look like a browser.
-_SEARCH_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
-
-# --- lite.duckduckgo.com/lite/ : simplest markup, DIRECT urls (preferred) ---
-# Classes are single-quoted there, e.g. class='result-link'. Be quote-agnostic.
-_LITE_LINK_RE = _re.compile(
-    r"<a\b[^>]*?href=[\"'](?P<href>https?://[^\"']+)[\"'][^>]*?"
-    r"class=[\"']result-link[\"'][^>]*>(?P<title>.*?)</a>",
-    _re.S | _re.I,
-)
-_LITE_SNIPPET_RE = _re.compile(
-    r"<td[^>]*class=[\"']result-snippet[\"'][^>]*>(?P<snippet>.*?)</td>",
-    _re.S | _re.I,
-)
-
-# --- html.duckduckgo.com/html/ : richer markup, REDIRECT urls (fallback) ---
-_HTML_LINK_RE = _re.compile(
-    r"<a\b[^>]*?class=[\"']result__a[\"'][^>]*?href=[\"'](?P<href>[^\"']+)[\"'][^>]*>"
-    r"(?P<title>.*?)</a>",
-    _re.S | _re.I,
-)
-_HTML_SNIPPET_RE = _re.compile(
-    r"<a\b[^>]*class=[\"']result__snippet[\"'][^>]*>(?P<snippet>.*?)</a>",
-    _re.S | _re.I,
-)
-
-# --- last-ditch generic: any external anchor that isn't DuckDuckGo/ads ---
-_ANY_ANCHOR_RE = _re.compile(
-    r"<a\b[^>]*?href=[\"'](?P<href>https?://[^\"']+)[\"'][^>]*>(?P<title>.*?)</a>",
-    _re.S | _re.I,
-)
+# Strip HTML tags / entities from Wikipedia search snippets.
 _TAG_RE = _re.compile(r"<[^>]+>")
-_SKIP_DOMAINS = ("duckduckgo.com", "duck.com", "spreadprivacy.com")
+_WORD_RE = _re.compile(r"[A-Za-z]{4,}")
+# Common words to ignore when locating the relevant part of an extract.
+_STOPWORDS = {
+    "what", "which", "where", "when", "whom", "whose", "that", "this", "with",
+    "have", "does", "about", "many", "much", "into", "from", "they", "them",
+    "your", "yours", "current", "currently", "please", "tell",
+}
 
 
 def _strip_html(s: str) -> str:
     return _html.unescape(_TAG_RE.sub("", s)).strip()
 
 
-def _clean_ddg_url(href: str) -> str:
-    """DuckDuckGo's HTML results wrap links in a redirect; pull out the real URL."""
-    if href.startswith("//"):
-        href = "https:" + href
-    parsed = _urlparse.urlparse(href)
-    if "duckduckgo.com" in parsed.netloc and parsed.path.startswith("/l/"):
-        qs = _urlparse.parse_qs(parsed.query)
-        target = qs.get("uddg", [None])[0]
-        if target:
-            return _urlparse.unquote(target)
-    return href
+def _focused_snippet(extract: str, query: str, title: str = "",
+                     head: int = 280, window: int = 260) -> str:
+    """A compact snippet: the intro opening plus a window around the first place
+    a meaningful query keyword appears, so facts like a population figure that
+    sit deeper in the intro still make it into the result."""
+    extract = extract.strip()
+    if not extract:
+        return ""
+    snippet = extract[:head].strip()
+    if len(extract) > head:
+        snippet += "…"
+
+    low = extract.lower()
+    # Ignore stopwords and the article's own title words (which appear all over
+    # the text), and try the most specific (longest) keyword first so we land on
+    # e.g. 'population' rather than the topic name.
+    title_words = {w.lower() for w in _WORD_RE.findall(title)}
+    keywords = sorted(
+        {w.lower() for w in _WORD_RE.findall(query)
+         if w.lower() not in _STOPWORDS and w.lower() not in title_words},
+        key=len, reverse=True,
+    )
+    pos = -1
+    for kw in keywords:
+        p = low.find(kw, head)  # only look past the part we already included
+        if p != -1:
+            pos = p
+            break
+    if pos != -1:
+        start = max(head, pos - window // 3)
+        end = min(len(extract), pos + window)
+        extra = extract[start:end].strip()
+        if extra:
+            snippet += " …" + extra + "…"
+    return snippet
 
 
-# Markers DuckDuckGo serves on its anti-bot / rate-limit "challenge" page.
-_DDG_BLOCKED = ("anomaly", "challenge-platform", "detected unusual")
+def _web_search(query: str = "", max_results: int = 5, **_: Any) -> str:
+    """Search Wikipedia for *query* and return the top article extracts as text.
 
-
-def _ddg_request(url: str, query: str):
-    """POST a query to a DuckDuckGo endpoint; return page text, or None if the
-    request failed or we got an anti-bot challenge page instead of results."""
+    Wikipedia is keyless, reliable, and never rate-limits the way scraping a
+    search engine does — ideal for the factual questions this tool serves
+    (people, places, populations, definitions, history).
+    """
     if requests is None:
-        return None
+        return "The web search library is unavailable."
+    query = (query or "").strip()
+    if not query:
+        return "I need something to search for."
+    # The first article's intro doesn't always contain the exact fact (the
+    # population figure may live in a 'Demographics of X' article), so pull
+    # several results regardless of what the model asked for.
     try:
-        resp = requests.post(
-            url,
-            data={"q": query, "kl": "us-en"},
-            headers={
-                "User-Agent": _SEARCH_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=10,
+        requested = int(max_results)
+    except (TypeError, ValueError):
+        requested = 5
+    n = max(5, min(requested, 8))
+
+    results = _wikipedia_search(query, n)
+    if not results:
+        return (
+            f"No results found for '{query}'. Wikipedia may be temporarily "
+            f"unavailable; try rephrasing or asking again."
         )
-        resp.raise_for_status()
-        text = resp.text
-        low = text.lower()
-        if "result-link" not in low and "result__a" not in low and any(
-            marker in low for marker in _DDG_BLOCKED
-        ):
-            log.info("DuckDuckGo returned an anti-bot page; falling back.")
-            return None
-        return text
-    except Exception as exc:
-        log.warning("DuckDuckGo request to %s failed: %s", url, exc)
-        return None
+
+    lines: list[str] = [f"Wikipedia results for '{query}':"]
+    for i, (title, url, snippet) in enumerate(results[:n]):
+        entry = f"{i + 1}. {title}"
+        if snippet:
+            entry += f" — {snippet}"
+        entry += f" ({url})"
+        lines.append(entry)
+    return "\n".join(lines)
 
 
 def _wikipedia_search(query: str, n: int) -> list[tuple[str, str, str]]:
-    """Reliable, keyless fallback: search Wikipedia and return intro extracts.
-
-    Excellent for the factual questions this tool is mostly used for (people,
-    places, populations, definitions) and never rate-limits the way scraping a
-    search engine does.
-    """
+    """Search Wikipedia and return (title, url, intro extract) triples."""
     if requests is None:
         return []
     api = "https://en.wikipedia.org/w/api.php"
@@ -165,7 +157,7 @@ def _wikipedia_search(query: str, n: int) -> list[tuple[str, str, str]]:
             if not p:
                 continue
             extract = (p.get("extract") or "").replace("\n", " ").strip()
-            snippet = extract[:400] + ("…" if len(extract) > 400 else "")
+            snippet = _focused_snippet(extract, query, title=title)
             url = p.get("fullurl") or (
                 "https://en.wikipedia.org/wiki/" + _urlparse.quote(title.replace(" ", "_"))
             )
@@ -175,105 +167,6 @@ def _wikipedia_search(query: str, n: int) -> list[tuple[str, str, str]]:
         log.warning("Wikipedia search failed: %s", exc)
         return []
 
-
-def _parse_results(page: str) -> list[tuple[str, str, str]]:
-    """Extract (title, url, snippet) triples from a DuckDuckGo results page."""
-    if not page:
-        return []
-
-    # 1) lite endpoint markup (direct URLs)
-    links = list(_LITE_LINK_RE.finditer(page))
-    if links:
-        snippets = _LITE_SNIPPET_RE.findall(page)
-        out = []
-        for i, m in enumerate(links):
-            title = _strip_html(m.group("title"))
-            url = m.group("href")
-            snip = _strip_html(snippets[i]) if i < len(snippets) else ""
-            if title:
-                out.append((title, url, snip))
-        if out:
-            return out
-
-    # 2) html endpoint markup (redirect URLs)
-    links = list(_HTML_LINK_RE.finditer(page))
-    if links:
-        snippets = _HTML_SNIPPET_RE.findall(page)
-        out = []
-        for i, m in enumerate(links):
-            title = _strip_html(m.group("title"))
-            url = _clean_ddg_url(m.group("href"))
-            snip = _strip_html(snippets[i]) if i < len(snippets) else ""
-            if title:
-                out.append((title, url, snip))
-        if out:
-            return out
-
-    # 3) generic fallback: any external, non-DuckDuckGo anchor
-    out = []
-    seen = set()
-    for m in _ANY_ANCHOR_RE.finditer(page):
-        url = _clean_ddg_url(m.group("href"))
-        host = _urlparse.urlparse(url).netloc.lower()
-        if any(d in host for d in _SKIP_DOMAINS) or url in seen:
-            continue
-        title = _strip_html(m.group("title"))
-        if not title:
-            continue
-        seen.add(url)
-        out.append((title, url, ""))
-    return out
-
-
-def _web_search(query: str = "", max_results: int = 5, **_: Any) -> str:
-    """Search the web via DuckDuckGo and return the top results as text."""
-    if requests is None:
-        return "The web search library is unavailable."
-    query = (query or "").strip()
-    if not query:
-        return "I need something to search for."
-    # The top result's snippet often lacks the actual fact (e.g. the population
-    # number lives in result #3), so always pull several results regardless of
-    # what the model asked for — a too-small count starves the answer.
-    try:
-        requested = int(max_results)
-    except (TypeError, ValueError):
-        requested = 5
-    n = max(5, min(requested, 8))
-
-    # Try the lite endpoint first (most stable, direct URLs), then the html one.
-    # DuckDuckGo aggressively rate-limits/anti-bots automated clients, so if both
-    # endpoints come back empty or with a challenge page we fall back to
-    # Wikipedia, which is keyless, reliable, and rich for factual questions.
-    results: list[tuple[str, str, str]] = []
-    for endpoint in ("https://lite.duckduckgo.com/lite/",
-                     "https://html.duckduckgo.com/html/"):
-        page = _ddg_request(endpoint, query)
-        results = _parse_results(page or "")
-        if results:
-            break
-
-    source = "web"
-    if not results:
-        results = _wikipedia_search(query, n)
-        source = "Wikipedia"
-
-    if not results:
-        return (
-            f"No results found for '{query}'. The search service may be "
-            f"temporarily unavailable; try rephrasing or asking again."
-        )
-
-    header = (f"Top web results for '{query}':" if source == "web"
-              else f"Wikipedia results for '{query}':")
-    lines: list[str] = [header]
-    for i, (title, url, snippet) in enumerate(results[:n]):
-        entry = f"{i + 1}. {title}"
-        if snippet:
-            entry += f" — {snippet}"
-        entry += f" ({url})"
-        lines.append(entry)
-    return "\n".join(lines)
 
 
 # WMO weather interpretation codes -> human text.
@@ -358,18 +251,16 @@ class LocalToolRegistry:
         self._funcs: dict[str, Callable[..., str]] = {}
         self._register(
             name="web_search",
-            description="Search the web for CURRENT or factual information you do "
-                        "not already know (news, events, people, prices, facts, "
-                        "'who/what/when is...'). Returns a ranked list of result "
-                        "titles, snippets, and URLs. Use this instead of guessing a "
-                        "URL; if you then need a page's full contents, pass one of "
-                        "the returned URLs to the web fetch tool.",
+            description="Look up factual information on Wikipedia (people, places, "
+                        "populations, history, definitions, 'who/what/when is...'). "
+                        "Returns a ranked list of article titles, intro extracts, "
+                        "and URLs. Use this for facts you are not certain of.",
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query, e.g. 'current president of France'.",
+                        "description": "The search query, e.g. 'population of Belize'.",
                     },
                     "max_results": {
                         "type": "integer",
