@@ -183,15 +183,22 @@ class Brain:
         first_token_sent = False
         full_answer: list[str] = []
 
-        for _ in range(max(1, self.cfg.max_tool_iterations)):
+        max_iter = max(1, self.cfg.max_tool_iterations)
+        for i in range(max_iter):
             collected_content = ""
             tool_calls: list[dict[str, Any]] = []
+
+            # On the final allowed pass, withhold tools so the model is FORCED to
+            # answer from the tool results it already has, instead of calling a
+            # tool again and ending the loop with nothing to say. Small models
+            # otherwise re-search every turn and never produce a spoken answer.
+            offer_tools = tool_schema if (max_iter == 1 or i < max_iter - 1) else None
 
             try:
                 stream = self._client.chat(
                     model=self.cfg.model,
                     messages=messages,
-                    tools=tool_schema,
+                    tools=offer_tools,
                     options=self._options(),
                     stream=True,
                 )
@@ -232,6 +239,9 @@ class Brain:
                         on_tool_call(name)
                     log.info("Tool call -> %s(%s)", name, args)
                     result = self._run_tool(name, args)
+                    preview = result.replace("\n", " ")
+                    log.info("Tool result <- %s: %s", name,
+                             preview[:300] + ("…" if len(preview) > 300 else ""))
                     messages.append({"role": "tool", "name": name, "content": result})
                 continue  # ask the model again now that it has tool output
 
@@ -265,6 +275,11 @@ _TOOL_HINTS = (
     "http://", "https://", "www.", ".com", ".org", ".net", "website", "web page",
     "webpage", "online", "search for", "look up", "lookup", "google", "wikipedia",
     "fetch", "download", "article", "url", "population of", "who is the current",
+    # General factual lookups — let the model reach for web_search when it likely
+    # needs facts it can't be sure of from memory.
+    "who is", "who was", "what is", "what are", "when is", "when was",
+    "where is", "how many", "how much", "how old", "capital of", "founder of",
+    "ceo of", "born", "died", "happened", "find out", "search", "look it up",
 )
 
 

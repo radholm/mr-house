@@ -31,6 +31,7 @@ pedalboard>=0.9.0
 # --- Brain ---
 ollama>=0.3.0           # local LLM client
 mcp>=1.0.0              # Model Context Protocol client
+requests>=2.31         # local tools: web search + weather HTTP calls
 
 # --- Display ---
 pygame>=2.5
