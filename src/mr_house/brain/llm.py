@@ -178,8 +178,11 @@ class Brain:
             self.local_tools.available or (self.tools and self.tools.available)
         )
         tool_schema = self._all_tool_schemas() if use_tools else None
+        tool_names = (
+            {t["function"]["name"] for t in tool_schema} if tool_schema else set()
+        )
         if use_tools:
-            log.info("Tools enabled: %s", [t["function"]["name"] for t in tool_schema])
+            log.info("Tools enabled: %s", sorted(tool_names))
 
         chunker = SentenceChunker()
         first_token_sent = False
@@ -190,6 +193,10 @@ class Brain:
         for i in range(max_iter):
             collected_content = ""
             tool_calls: list[dict[str, Any]] = []
+            # Speech gating for "tool call spoken as text": None=undecided,
+            # True=looks like a tool call so buffer it, False=normal speech.
+            speak_suppressed: Optional[bool] = None
+            fed_len = 0  # chars of collected_content already sent to the chunker
 
             # Offer tools only until the model has run a tool round once. After
             # that we withhold them so it is FORCED to answer from the results it
@@ -220,13 +227,42 @@ class Brain:
                         tool_calls.append(_normalize_tool_call(c))
 
                 if content:
-                    if not first_token_sent and on_first_token:
-                        on_first_token()
-                        first_token_sent = True
                     collected_content += content
-                    for sentence in chunker.feed(content):
-                        full_answer.append(sentence)
-                        yield sentence
+                    # Decide once whether this looks like the model "speaking" a
+                    # tool call as text (e.g. '{"name": "web_search", ...}' or
+                    # 'web_search(query="…")'). If so we BUFFER it instead of
+                    # streaming it to the voice, then turn it into a real call.
+                    if speak_suppressed is None:
+                        lead = collected_content.lstrip()
+                        if lead:
+                            speak_suppressed = (
+                                use_tools
+                                and _looks_like_tool_call_text(lead, tool_names)
+                            )
+                    if speak_suppressed is False:
+                        if not first_token_sent and on_first_token:
+                            on_first_token()
+                            first_token_sent = True
+                        new = collected_content[fed_len:]
+                        fed_len = len(collected_content)
+                        for sentence in chunker.feed(new):
+                            full_answer.append(sentence)
+                            yield sentence
+                    # speak_suppressed is None (undecided) or True: keep buffering.
+
+            # The model may have emitted the tool call as TEXT rather than a real
+            # tool call. Recover it from the buffer so we execute it instead of
+            # reading it aloud.
+            if not tool_calls and collected_content.strip() and (
+                speak_suppressed
+                or _looks_like_tool_call_text(collected_content.lstrip(), tool_names)
+            ):
+                text_calls = _extract_text_tool_calls(collected_content, tool_names)
+                if text_calls:
+                    log.info("Recovered %d tool call(s) the model spoke as text.",
+                             len(text_calls))
+                    tool_calls = text_calls
+                    collected_content = ""  # never speak the raw call text
 
             # If the model asked for tools, run them and loop again.
             if tool_calls and not collected_content.strip():
@@ -248,6 +284,16 @@ class Brain:
                              preview[:300] + ("…" if len(preview) > 300 else ""))
                     messages.append({"role": "tool", "name": name, "content": result})
                 continue  # ask the model again now that it has tool output
+
+            # We suspected a tool call and buffered the text, but it turned out to
+            # be a normal reply — speak it now (it was never streamed).
+            if speak_suppressed and collected_content.strip():
+                if not first_token_sent and on_first_token:
+                    on_first_token()
+                    first_token_sent = True
+                for sentence in chunker.feed(collected_content[fed_len:]):
+                    full_answer.append(sentence)
+                    yield sentence
 
             # Otherwise we have the final answer; flush trailing text.
             tail = chunker.flush()
@@ -284,6 +330,15 @@ _TOOL_HINTS = (
     "who is", "who was", "what is", "what are", "when is", "when was",
     "where is", "how many", "how much", "how old", "capital of", "founder of",
     "ceo of", "born", "died", "happened", "find out", "search", "look it up",
+    # Questions about Mr. House himself -> get_self_info.
+    "who are you", "what are you", "your name", "about yourself", "about you",
+    "your history", "your past", "your story", "your goal", "your goals",
+    "tell me about you", "introduce yourself", "what do you want",
+    # Fallout universe lore -> fallout_lore.
+    "fallout", "new vegas", "mojave", "wasteland", "ncr", "new california",
+    "caesar", "legion", "the strip", "lucky 38", "securitron", "courier",
+    "brotherhood of steel", "enclave", "vault", "robco", "great war",
+    "three families", "boomers", "powder gangers", "deathclaw", "pip-boy",
 )
 
 
@@ -312,4 +367,135 @@ def _normalize_tool_call(call: Any) -> dict[str, Any]:
 
 def _to_ollama_call(tc: dict[str, Any]) -> dict[str, Any]:
     return {"function": {"name": tc["name"], "arguments": tc["arguments"]}}
+
+
+# --------------------------------------------------------------------------- #
+#  Tool calls emitted as TEXT (the model "speaks" the call instead of using    #
+#  the tool API). We detect this, suppress it from the voice, and execute it.  #
+# --------------------------------------------------------------------------- #
+_TEXT_TOOLCALL_PREFIX = re.compile(
+    r"^\s*(\{|\[|`{3}|<\s*tool_call|<\s*function|tool_call\b|functools\b)", re.I
+)
+_NAME_CALL_PREFIX = re.compile(r"^\s*([A-Za-z_]\w*)\s*[(\{]")
+
+
+def _looks_like_tool_call_text(text: str, tool_names: set[str]) -> bool:
+    """Heuristic: does *text* look like a tool call the model typed as prose?"""
+    s = text.lstrip()
+    if not s:
+        return False
+    if _TEXT_TOOLCALL_PREFIX.match(s):
+        return True
+    m = _NAME_CALL_PREFIX.match(s)
+    if m and m.group(1) in tool_names:
+        return True
+    # e.g. mentions a tool name immediately with JSON-ish args nearby
+    for name in tool_names:
+        if s.startswith(name) and ("(" in s[:len(name) + 3] or "{" in s[:len(name) + 3]):
+            return True
+    return False
+
+
+def _balanced_json_objects(s: str) -> list[str]:
+    """Return top-level {...} substrings, honouring nesting and quotes."""
+    out: list[str] = []
+    depth = 0
+    start = None
+    in_str = False
+    esc = False
+    for i, c in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    out.append(s[start:i + 1])
+                    start = None
+    return out
+
+
+def _calls_from_obj(obj: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if isinstance(obj, list):
+        for o in obj:
+            out += _calls_from_obj(o)
+        return out
+    if not isinstance(obj, dict):
+        return out
+    if isinstance(obj.get("tool_calls"), list):
+        for o in obj["tool_calls"]:
+            out += _calls_from_obj(o)
+        return out
+    func = obj.get("function") if isinstance(obj.get("function"), dict) else None
+    src = func or obj
+    name = src.get("name") or obj.get("tool") or obj.get("tool_name")
+    args = src.get("arguments")
+    if args is None:
+        args = obj.get("parameters")
+    if args is None:
+        args = obj.get("args")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+    if name:
+        out.append({"name": str(name), "arguments": args if isinstance(args, dict) else {}})
+    return out
+
+
+_KW_ARG_RE = re.compile(
+    r"""([A-Za-z_]\w*)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|([^,)\}]+))"""
+)
+
+
+def _parse_call_args(s: str) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    for m in _KW_ARG_RE.finditer(s):
+        key = m.group(1)
+        val = m.group(2) if m.group(2) is not None else (
+            m.group(3) if m.group(3) is not None else (m.group(4) or "").strip()
+        )
+        args[key] = val
+    return args
+
+
+def _extract_text_tool_calls(text: str, tool_names: set[str]) -> list[dict[str, Any]]:
+    """Parse tool calls the model wrote as text (JSON or ``name(args)`` form)."""
+    calls: list[dict[str, Any]] = []
+    # 1) JSON object(s).
+    for frag in _balanced_json_objects(text):
+        try:
+            obj = json.loads(frag)
+        except Exception:
+            continue
+        calls += _calls_from_obj(obj)
+    # Keep only calls naming a real tool (when we know the tool names).
+    if calls and tool_names:
+        named = [c for c in calls if c["name"] in tool_names]
+        if named:
+            return named
+    if calls:
+        return calls
+    # 2) Function-style: web_search(query="…").
+    for m in re.finditer(r"([A-Za-z_]\w*)\s*\(([^)]*)\)", text):
+        name = m.group(1)
+        if tool_names and name not in tool_names:
+            continue
+        calls.append({"name": name, "arguments": _parse_call_args(m.group(2))})
+    return calls
+
 

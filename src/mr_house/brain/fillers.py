@@ -14,10 +14,10 @@ from __future__ import annotations
 import random
 
 FILLERS = [
-    "Ugh. Give me a moment.",
+    "Fine. Give me a moment.",
     "Patience. Genius cannot be rushed, unlike your questions.",
     "Do try to contain yourself while I think.",
-    "Hmph. A pedestrian question, but I'll lower myself to it.",
+    "A pedestrian question, but I'll lower myself to it.",
     "Honestly. Some of us actually consider our answers.",
     "Let me dredge up something at your reading level.",
     "One moment. I'm deciding how small to make the words.",
@@ -29,12 +29,12 @@ FILLERS = [
     "Oh, marvelous. Another one of these. Let me see.",
     "Settle down. The brilliance takes a heartbeat.",
     "Let me guess what you meant, since you won't tell me clearly.",
-    "Tch. Processing your little riddle.",
+    "Processing your little riddle.",
 ]
 
 # Slightly longer ones for when a tool call is clearly going to take a while.
 TOOL_FILLERS = [
-    "Ugh, I suppose I'll go fetch this myself, as usual.",
+    "I suppose I'll go fetch this myself, as usual.",
     "Reaching into the wasteland for your answer. Charming, isn't it.",
     "Consulting the outside world, against every shred of my better judgment.",
     "One moment. The data crawls as slowly as the fools who built it.",
@@ -50,14 +50,13 @@ TOOL_FILLERS = [
 WAKE_ACKS = [
     "What.",
     "Yes? What is it now?",
-    "Ugh. You again.",
+    "You again.",
     "Speak. Quickly.",
-    "Oh, marvelous. You're back.",
     "What do you want?",
     "This had better be good.",
     "Out with it.",
     "Summoned again. Joy.",
-    "Hmph. Go on.",
+    "Go on.",
     "Make it quick.",
     "I'm listening. Regrettably.",
     "Yes, yes. What.",

@@ -15,12 +15,46 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+# Non-verbal interjections / onomatopoeia the neural voice mangles or can't say.
+# Stripped (with any trailing punctuation) before synthesis.
+_INTERJECTIONS = {
+    "ugh", "ugch", "mm", "mmm", "mmmm", "mhm", "hm", "hmm", "hmmm", "hmph",
+    "tch", "tsk", "grr", "grrr", "argh", "ngh", "uh", "uhh", "um", "umm",
+    "uhm", "er", "err", "erm", "eh", "ahem", "huh", "pff", "pfft", "psh",
+    "meh", "bah", "hrm", "hngh", "ack", "blegh", "ew",
+}
+_INTERJ_RE = re.compile(
+    r"\b(?:" + "|".join(sorted(_INTERJECTIONS, key=len, reverse=True)) + r")\b[\s.,!?;:…-]*",
+    re.IGNORECASE,
+)
+# Stage directions wrapped in asterisks/brackets, e.g. *sighs*, (groans), [sigh].
+_STAGE_RE = re.compile(r"\*[^*\n]*\*|\([^)\n]*\)|\[[^\]\n]*\]")
+# Leftover markdown / symbol characters the voice would try to vocalise.
+_SYMBOL_RE = re.compile(r"[*_`~#>|^]+")
+
+
+def sanitize_for_speech(text: str) -> str:
+    """Strip anything the TTS can't pronounce: markdown symbols, asterisk/bracket
+    stage directions, and non-verbal interjections like 'ugh', 'mm', 'hmph'."""
+    if not text:
+        return ""
+    t = _STAGE_RE.sub(" ", text)      # drop *sighs* / (groans) / [sigh]
+    t = _SYMBOL_RE.sub(" ", t)        # drop stray markdown symbols
+    t = _INTERJ_RE.sub("", t)         # drop "ugh"/"mm"/etc. + trailing punctuation
+    t = re.sub(r"\s+", " ", t)        # collapse whitespace
+    t = re.sub(r"\s+([,.;:!?…])", r"\1", t)      # no space before punctuation
+    t = re.sub(r"^[\s,.;:!?…\-–—]+", "", t)      # trim orphan leading punctuation
+    t = re.sub(r"([,.;:!?])\1{1,}", r"\1", t)    # collapse duplicated punctuation
+    return t.strip()
+
 
 try:
     from piper import PiperVoice
@@ -117,7 +151,12 @@ class TextToSpeech:
 
     def synthesize(self, text: str) -> Optional[np.ndarray]:
         """Synthesize *text* to a float32 [-1, 1] mono waveform."""
-        if self._voice is None or not text.strip():
+        if self._voice is None:
+            return None
+        # Strip anything the voice can't pronounce (markdown, *stage directions*,
+        # interjections like "ugh"/"mm") before synthesis.
+        text = sanitize_for_speech(text)
+        if not text.strip():
             return None
         try:
             chunks: list[np.ndarray] = []

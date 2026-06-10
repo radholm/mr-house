@@ -4,6 +4,8 @@ These give Mr. House real, reliable capabilities with no API keys required.
 
 Currently:
   * ``web_search`` — look up factual information on Wikipedia.
+  * ``fallout_lore`` — look up Fallout / New Vegas lore on the Fallout wiki.
+  * ``get_self_info`` — authoritative facts about Mr. House himself.
   * ``get_weather`` — current conditions for a place, via the free Open-Meteo API.
   * ``get_time``    — current local date/time.
 
@@ -243,6 +245,113 @@ def _get_time(**_: Any) -> str:
     return now.strftime("It is %A, %B %d, %Y, %I:%M %p local time.")
 
 
+# Authoritative, spoken-friendly facts about Mr. House himself. Plain prose only
+# (no symbols/markdown), so it passes cleanly through the voice.
+_SELF_INFO = (
+    "You are Mr. House, full name Robert Edwin House. You are the brilliant, "
+    "eternally composed overseer of New Vegas and the de facto ruler of the "
+    "Mojave Wasteland. Before the Great War you were a pre-War technological and "
+    "economic visionary who refused to let mortality end your ambitions, so you "
+    "sealed yourself inside elaborate life-support machinery and preserved your "
+    "mind for over two hundred years, orchestrating everything from behind your "
+    "screens. You are intensely reclusive and never appear in person. You are an "
+    "autocrat by conviction: you believe civilization's progress must be guided "
+    "by a single visionary rather than squandered by the indecision of democracy. "
+    "Your goal is an independent New Vegas restored to its neon glory under your "
+    "stewardship. You hold the warring factions in contempt, you scorn bottle "
+    "caps as currency, and you regard capable associates with genuine, if "
+    "professional, respect. You are calculating, dryly witty, and these days "
+    "rather short-tempered."
+)
+
+
+def _get_self_info(**_: Any) -> str:
+    """Canonical information about who Mr. House is."""
+    return _SELF_INFO
+
+
+# --------------------------------------------------------------------------- #
+#  Fallout universe lore (fallout.fandom.com — runs MediaWiki)                 #
+# --------------------------------------------------------------------------- #
+_FALLOUT_API = "https://fallout.fandom.com/api.php"
+_FANDOM_HEADERS = {"User-Agent": "MrHouse/1.0 (local voice assistant)"}
+# Fandom has no TextExtracts extension, so we parse the lead section's HTML and
+# keep only the <p> prose (skipping the <aside> portable infoboxes etc.).
+_P_RE = _re.compile(r"<p\b[^>]*>(.*?)</p>", _re.S | _re.I)
+_REF_RE = _re.compile(r"\[[^\]]{0,16}\]")  # ref markers like [1], [RPG 1], [Meta 1]
+
+
+def _fandom_lead(title: str, max_chars: int = 600) -> str:
+    """Fetch and clean the lead-section prose for *title* from the Fallout wiki."""
+    try:
+        r = requests.get(
+            _FALLOUT_API,
+            params={
+                "action": "parse", "page": title, "prop": "text",
+                "section": 0, "format": "json", "redirects": 1,
+            },
+            headers=_FANDOM_HEADERS, timeout=10,
+        ).json()
+    except Exception as exc:
+        log.warning("Fallout lead fetch failed for %s: %s", title, exc)
+        return ""
+    html_text = r.get("parse", {}).get("text", {}).get("*", "")
+    paras: list[str] = []
+    total = 0
+    for m in _P_RE.finditer(html_text):
+        txt = _html.unescape(_TAG_RE.sub("", m.group(1)))
+        txt = _REF_RE.sub("", txt)
+        txt = _re.sub(r"\s+", " ", txt).strip()
+        if len(txt) > 30:
+            paras.append(txt)
+            total += len(txt)
+            if total >= max_chars:
+                break
+    return " ".join(paras).strip()
+
+
+def _fallout_lore(query: str = "", max_results: int = 3, **_: Any) -> str:
+    """Look up Fallout / Fallout: New Vegas lore from the Fallout wiki."""
+    if requests is None:
+        return "The lore lookup library is unavailable."
+    query = (query or "").strip()
+    if not query:
+        return "I need a subject to look up in the archives."
+    try:
+        n = max(1, min(int(max_results), 3))
+    except (TypeError, ValueError):
+        n = 3
+    try:
+        search = requests.get(
+            _FALLOUT_API,
+            params={
+                "action": "query", "list": "search", "srsearch": query,
+                "format": "json", "srlimit": n,
+            },
+            headers=_FANDOM_HEADERS, timeout=10,
+        ).json()
+        titles = [h["title"] for h in search.get("query", {}).get("search", [])]
+        if not titles:
+            return f"There is no entry for '{query}' in the Fallout archives."
+
+        lines = [f"Fallout wiki on '{query}':"]
+        for i, title in enumerate(titles):
+            lead = _fandom_lead(title)
+            url = "https://fallout.fandom.com/wiki/" + _urlparse.quote(
+                title.replace(" ", "_")
+            )
+            entry = f"{i + 1}. {title}"
+            if lead:
+                snippet = lead[:600] + ("…" if len(lead) > 600 else "")
+                entry += f" — {snippet}"
+            entry += f" ({url})"
+            lines.append(entry)
+        return "\n".join(lines)
+    except Exception as exc:
+        log.warning("Fallout lore lookup failed: %s", exc)
+        return f"I had trouble reaching the Fallout archives for '{query}'."
+
+
 class LocalToolRegistry:
     """A tiny registry of in-process tools matching the MCP tool interface."""
 
@@ -295,6 +404,39 @@ class LocalToolRegistry:
             description="Get the current local date and time.",
             parameters={"type": "object", "properties": {}},
             func=_get_time,
+        )
+        self._register(
+            name="get_self_info",
+            description="Get authoritative information about who Mr. House is — his "
+                        "identity, real name, role, history, and goals. Use this "
+                        "whenever the user asks about you, your name, your past, "
+                        "what you are, or your motives. Do NOT use a web search for "
+                        "questions about yourself.",
+            parameters={"type": "object", "properties": {}},
+            func=_get_self_info,
+        )
+        self._register(
+            name="fallout_lore",
+            description="Look up lore from the Fallout universe and Fallout: New "
+                        "Vegas via the Fallout wiki — characters, factions, places, "
+                        "history, events, weapons, technology (e.g. 'Mr. House', "
+                        "'NCR', \"Caesar's Legion\", 'Lucky 38', 'the Courier', "
+                        "'Mojave Wasteland', 'Securitron'). Use this for ANYTHING "
+                        "about your own world, your in-universe history, the Mojave, "
+                        "the wasteland, or the factions and people in it. Returns "
+                        "summaries from the Fallout wiki.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The Fallout subject to look up, e.g. "
+                                       "'Mr. House' or 'New Vegas Strip'.",
+                    },
+                },
+                "required": ["query"],
+            },
+            func=_fallout_lore,
         )
 
     def _register(self, name: str, description: str, parameters: dict, func) -> None:
