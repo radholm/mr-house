@@ -52,8 +52,15 @@ def sanitize_for_speech(text: str) -> str:
     t = re.sub(r"\s+", " ", t)        # collapse whitespace
     t = re.sub(r"\s+([,.;:!?…])", r"\1", t)      # no space before punctuation
     t = re.sub(r"^[\s,.;:!?…\-–—]+", "", t)      # trim orphan leading punctuation
-    t = re.sub(r"([,.;:!?])\1{1,}", r"\1", t)    # collapse duplicated punctuation
+    # Collapse duplicated punctuation, but NOT '.' — an ellipsis "..." is kept so
+    # the voice can pause on it.
+    t = re.sub(r"([,;:!?])\1{1,}", r"\1", t)
     return t.strip()
+
+
+# Split on an ellipsis ("..." or "…") so we can insert a real pause there while
+# keeping the sentence as one continuous utterance.
+_ELLIPSIS_SPLIT = re.compile(r"\s*(?:\.\.\.+|…)\s*")
 
 
 try:
@@ -77,6 +84,7 @@ class TextToSpeech:
         noise_w: float = 0.95,
         expressiveness: float = 0.12,
         sentence_silence: float = 0.15,
+        ellipsis_pause: float = 0.35,
     ) -> None:
         self.length_scale = length_scale
         self.noise_scale = noise_scale
@@ -85,6 +93,8 @@ class TextToSpeech:
         # reply doesn't come out flat/monotone. 0 disables the jitter.
         self.expressiveness = max(0.0, expressiveness)
         self.sentence_silence = sentence_silence  # kept for API compatibility
+        # Seconds of silence inserted where an "..." appears (0 disables).
+        self.ellipsis_pause = max(0.0, ellipsis_pause)
         self.sample_rate = 22050
         self._voice = None
         self._syn_config = None
@@ -158,18 +168,40 @@ class TextToSpeech:
         text = sanitize_for_speech(text)
         if not text.strip():
             return None
+        # Split on any ellipsis so we can drop a real pause there — the sentence
+        # is still spoken as one continuous utterance (and the model's context /
+        # memory keeps the full text with the "..." intact).
+        segments = [s.strip() for s in _ELLIPSIS_SPLIT.split(text) if s.strip()]
+        if not segments:
+            return None
         try:
-            chunks: list[np.ndarray] = []
-            syn_config = self._config_for(text)
-            for audio_chunk in self._voice.synthesize(text, syn_config):
-                arr = np.asarray(audio_chunk.audio_int16_array, dtype=np.int16)
-                if arr.size:
-                    chunks.append(arr)
-            if not chunks:
+            pause = None
+            if self.ellipsis_pause > 0 and len(segments) > 1:
+                pause = np.zeros(int(self.sample_rate * self.ellipsis_pause), dtype=np.float32)
+            pieces: list[np.ndarray] = []
+            for seg in segments:
+                seg_pcm = self._synth_one(seg)
+                if seg_pcm is None or seg_pcm.size == 0:
+                    continue
+                if pieces and pause is not None:
+                    pieces.append(pause)
+                pieces.append(seg_pcm)
+            if not pieces:
                 return None
-            pcm = np.concatenate(chunks).astype(np.float32) / 32768.0
-            return pcm
+            return np.concatenate(pieces)
         except Exception as exc:
             log.error("TTS synthesis failed: %s", exc)
             return None
+
+    def _synth_one(self, text: str) -> Optional[np.ndarray]:
+        """Synthesize a single segment (no ellipsis handling) to float32 PCM."""
+        chunks: list[np.ndarray] = []
+        syn_config = self._config_for(text)
+        for audio_chunk in self._voice.synthesize(text, syn_config):
+            arr = np.asarray(audio_chunk.audio_int16_array, dtype=np.int16)
+            if arr.size:
+                chunks.append(arr)
+        if not chunks:
+            return None
+        return np.concatenate(chunks).astype(np.float32) / 32768.0
 

@@ -88,6 +88,7 @@ class TTSConfig:
     noise_scale: float = 0.85
     noise_w: float = 0.95
     expressiveness: float = 0.12   # per-sentence prosody jitter (0 = off)
+    ellipsis_pause: float = 0.35   # seconds of pause at "..." (0 = off)
     sentence_silence: float = 0.15
 
 

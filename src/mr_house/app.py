@@ -84,6 +84,7 @@ class MrHouse:
             noise_w=cfg.tts.noise_w,
             expressiveness=cfg.tts.expressiveness,
             sentence_silence=cfg.tts.sentence_silence,
+            ellipsis_pause=cfg.tts.ellipsis_pause,
         ) if cfg.tts.enabled else None
         out_sr = self.tts.sample_rate if (self.tts and self.tts.available) else cfg.audio.output_sample_rate
         self.fx = VoiceEffects(cfg.voice_fx, sample_rate=out_sr)

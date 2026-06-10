@@ -68,6 +68,9 @@ tts:
   # Per-sentence random variation added to the above so consecutive sentences
   # aren't delivered with identical, flat prosody. 0 disables the jitter.
   expressiveness: 0.12
+  # Seconds of pause inserted where an "..." appears, so he trails off naturally
+  # (the sentence stays one continuous utterance). 0 disables.
+  ellipsis_pause: 0.35
   sentence_silence: 0.15    # seconds of silence between sentences
 
 # --------------------------------------------------------------- voice FX
