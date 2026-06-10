@@ -34,7 +34,7 @@ from .audio.effects import VoiceEffects
 from .audio.player import AudioPlayer
 from .brain.personality import build_system_prompt
 from .brain.memory import ConversationMemory
-from .brain.fillers import random_filler, random_tool_filler
+from .brain.fillers import random_filler, random_tool_filler, random_wake_ack
 from .brain.mcp_tools import MCPToolManager
 from .brain.llm import Brain
 
@@ -236,8 +236,8 @@ class MrHouse:
     def _on_wake(self) -> None:
         log.info("== WAKE ==")
         # Speak the acknowledgement to completion BEFORE we start recording, then
-        # flush the mic, so we don't record (and transcribe) our own "Yes?".
-        self._speak("Yes?", blocking=True)
+        # flush the mic, so we don't record (and transcribe) our own reply.
+        self._speak(random_wake_ack(), blocking=True)
         self.mic.flush()
 
     def _handle_interaction(self, start_timeout_ms: Optional[int] = None,
