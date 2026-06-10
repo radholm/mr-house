@@ -6,8 +6,10 @@ Currently:
   * ``web_search`` — look up factual information on Wikipedia.
   * ``fallout_lore`` — look up Fallout / New Vegas lore on the Fallout wiki.
   * ``get_self_info`` — authoritative facts about Mr. House himself.
-  * ``get_weather`` — current conditions for a place, via the free Open-Meteo API.
+  * ``get_weather`` — current conditions / forecast, via the free Open-Meteo API.
   * ``get_time``    — current local date/time.
+  * ``control_lights`` — Apple Home (HomeKit) lights/scenes via macOS Shortcuts
+    (only registered when configured under ``home`` in config.yaml).
 
 Each tool exposes an OpenAI/Ollama function schema and a plain-text result, so it
 plugs into the same tool-calling loop as the brain.
@@ -18,7 +20,10 @@ from __future__ import annotations
 import datetime as _dt
 import html as _html
 import logging
+import platform as _platform
 import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
 import urllib.parse as _urlparse
 from typing import Any, Callable
 
@@ -484,10 +489,128 @@ def _fallout_lore(query: str = "", max_results: int = 3, **_: Any) -> str:
         return f"I had trouble reaching the Fallout archives for '{query}'."
 
 
+class _HomeControl:
+    """Controls smart-home lights/scenes via one of two backends.
+
+    * ``shortcuts`` (macOS only): runs a named macOS Shortcut (containing Home
+      actions) via the ``shortcuts`` CLI. Apple-only.
+    * ``webhook`` (any OS — Windows/Linux/Mac): sends an HTTP request. This is
+      how it works off a Mac — point each command at a webhook that triggers the
+      action, e.g. Home Assistant's REST API, or an iPhone automation service
+      like Pushcut that runs your Home shortcut on the phone.
+
+    Config maps a spoken intent -> a Shortcut name (shortcuts backend) or a
+    webhook spec (webhook backend).
+    """
+
+    def __init__(self, home_cfg: Any = None) -> None:
+        self.enabled = bool(getattr(home_cfg, "enabled", False)) if home_cfg else False
+        backend = (getattr(home_cfg, "backend", "") or "").lower().strip()
+        if not backend:
+            backend = "shortcuts" if _platform.system() == "Darwin" else "webhook"
+        self.backend = backend
+        self.shortcuts = {
+            str(k).lower().strip(): v
+            for k, v in (getattr(home_cfg, "shortcuts", None) or {}).items()
+        }
+        self.webhooks = {
+            str(k).lower().strip(): v
+            for k, v in (getattr(home_cfg, "webhooks", None) or {}).items()
+        }
+
+    @property
+    def _commands(self) -> dict:
+        return self.shortcuts if self.backend == "shortcuts" else self.webhooks
+
+    @property
+    def configured(self) -> bool:
+        return self.enabled and bool(self._commands)
+
+    def commands_text(self) -> str:
+        return "; ".join(sorted(self._commands.keys()))
+
+    def _match_key(self, command: str):
+        c = (command or "").lower().strip()
+        cmds = self._commands
+        if not c:
+            return None
+        if c in cmds:
+            return c
+        ctoks = set(_re.findall(r"\w+", c))
+        best, best_score = None, 0.0
+        for key in cmds:
+            ktoks = set(_re.findall(r"\w+", key))
+            score = float(len(ctoks & ktoks))
+            if c in key or key in c:
+                score += 1.5
+            if score > best_score:
+                best, best_score = key, score
+        return best if best_score > 0 else None
+
+    def run(self, command: str = "", **_: Any) -> str:
+        key = self._match_key(command)
+        if key is None:
+            return ("No matching light command. Available commands: "
+                    + self.commands_text() + ".")
+        if self.backend == "shortcuts":
+            return self._run_shortcut(str(self.shortcuts[key]), command)
+        return self._run_webhook(self.webhooks[key], command)
+
+    @staticmethod
+    def _ok(command: str) -> str:
+        return (f"Done — the '{command}' action was carried out successfully. "
+                "Confirm to the user that it is done, in your own voice. Do not "
+                "mention shortcuts, tools, webhooks, or how it was done.")
+
+    def _run_shortcut(self, name: str, command: str) -> str:
+        if _shutil.which("shortcuts") is None:
+            return ("Apple Home control via Shortcuts needs macOS. On this machine "
+                    "use the 'webhook' backend instead.")
+        try:
+            proc = _subprocess.run(
+                ["shortcuts", "run", name],
+                capture_output=True, text=True, timeout=20,
+            )
+        except FileNotFoundError:
+            return "The Shortcuts command isn't available on this machine."
+        except _subprocess.TimeoutExpired:
+            return f"The '{name}' action timed out."
+        if proc.returncode != 0:
+            err = (proc.stderr or "").strip()
+            return (f"I couldn't carry out '{command}'. {err}".strip()
+                    + f" (Check that a Shortcut named '{name}' exists.)")
+        return self._ok(command)
+
+    def _run_webhook(self, spec: Any, command: str) -> str:
+        if requests is None:
+            return "The web request library is unavailable, so I can't reach the home hub."
+        # spec may be a bare URL string, or a dict with url/method/headers/body/json.
+        if isinstance(spec, str):
+            spec = {"url": spec}
+        if not isinstance(spec, dict) or not spec.get("url"):
+            return f"The '{command}' command is misconfigured (no URL)."
+        method = str(spec.get("method", "POST")).upper()
+        url = spec["url"]
+        headers = spec.get("headers") or {}
+        kwargs: dict[str, Any] = {"headers": headers, "timeout": 15}
+        if "json" in spec and spec["json"] is not None:
+            kwargs["json"] = spec["json"]
+        elif spec.get("body") is not None:
+            kwargs["data"] = spec["body"]
+        try:
+            resp = requests.request(method, url, **kwargs)
+            resp.raise_for_status()
+        except Exception as exc:
+            log.error("Home webhook failed: %s", exc)
+            return (f"I couldn't reach the home system to '{command}'. "
+                    "The hub may be offline.")
+        return self._ok(command)
+
+
 class LocalToolRegistry:
     """A tiny registry of in-process tools matching the MCP tool interface."""
 
-    def __init__(self) -> None:
+    def __init__(self, home_cfg: Any = None) -> None:
         self._tools: dict[str, dict[str, Any]] = {}
         self._funcs: dict[str, Callable[..., str]] = {}
         self._register(
@@ -577,6 +700,33 @@ class LocalToolRegistry:
             },
             func=_fallout_lore,
         )
+
+        # Smart-home light/scene control (macOS Shortcuts or a cross-platform
+        # webhook) — only registered when enabled and at least one command maps.
+        home = _HomeControl(home_cfg)
+        if home.configured:
+            self._register(
+                name="control_lights",
+                description=(
+                    "Control the user's smart-home lights and scenes (turn lights "
+                    "on or off, dim or brighten them, or set a scene). Pass the "
+                    "closest matching command from this list: "
+                    + home.commands_text() + "."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The light/scene command to run, e.g. "
+                                           "'turn the lights on'. Choose the closest "
+                                           "of the available commands.",
+                        },
+                    },
+                    "required": ["command"],
+                },
+                func=home.run,
+            )
 
     def _register(self, name: str, description: str, parameters: dict, func) -> None:
         self._tools[name] = {

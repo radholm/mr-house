@@ -139,6 +139,47 @@ mcp:
     #   env:
     #     WEATHER_API_KEY: "${WEATHER_API_KEY}"
 
+# --------------------------------------------------------------- smart home
+# Control your lights/scenes. Two backends:
+#
+#   backend: "shortcuts"  (macOS ONLY) — runs a macOS Shortcut you created in
+#       the Shortcuts app that contains Home (HomeKit) actions. Map intent ->
+#       exact Shortcut name under `shortcuts:` below.
+#
+#   backend: "webhook"  (ANY OS — Windows / Linux / Mac) — sends an HTTP request.
+#       This is how it works off a Mac. Point each command at a webhook that
+#       performs the action. Good options:
+#         * iPhone via Pushcut (https://pushcut.io): make a Pushcut automation
+#           that runs your Home shortcut on the phone; paste its webhook URL.
+#         * Home Assistant REST API (runs on a PC/Pi; controls most brands).
+#         * IFTTT / SmartThings / manufacturer webhooks.
+#       Each entry is a URL string, or a dict: {url, method, headers, body, json}.
+#
+# Leave `backend` empty to auto-pick: shortcuts on macOS, webhook elsewhere.
+home:
+  enabled: true
+  backend: ""            # "shortcuts" | "webhook" | "" (auto)
+
+  # Used when backend == shortcuts (macOS):
+  shortcuts:
+    "turn the lights on": "Default On"
+    "turn the lights off": "Default Off"
+
+  # Used when backend == webhook (any OS). Examples — replace with your own:
+  webhooks:
+    # Simplest: a Pushcut automation URL that runs a Home shortcut on your iPhone
+    # "turn the lights on": "https://api.pushcut.io/<token>/notifications/LightsOn"
+    # "turn the lights off": "https://api.pushcut.io/<token>/notifications/LightsOff"
+    # Full form, e.g. calling Home Assistant:
+    # "dim the lights":
+    #   url: "http://homeassistant.local:8123/api/services/light/turn_on"
+    #   method: "POST"
+    #   headers:
+    #     Authorization: "Bearer YOUR_LONG_LIVED_TOKEN"
+    #   json:
+    #     entity_id: "light.living_room"
+    #     brightness_pct: 30
+
 # ---------------------------------------------------------------- display
 display:
   enabled: true
@@ -150,14 +191,14 @@ display:
   fullscreen: true
   fps: 60
   shader:
-    scanline_intensity: 0.35
-    scanline_count: 800.0
+    scanline_intensity: 0.55
+    scanline_count: 200.0
     chromatic_aberration: 0.0025
-    vignette: 0.35
-    flicker: 0.04
-    glitch_amount: 0.6        # strength of glitch bursts
-    glitch_speaking_boost: 2.5 # glitch harder while Mr. House talks
-    curvature: 0.06           # CRT barrel distortion
+    vignette: 1.75
+    flicker: 0.06
+    glitch_amount: 0.1        # strength of glitch bursts
+    glitch_speaking_boost: 0.5 # glitch harder while Mr. House talks
+    curvature: 1.0           # CRT barrel distortion
 
 # --------------------------------------------------------------- logging
 log_level: "INFO"

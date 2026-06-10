@@ -145,6 +145,20 @@ class MCPConfig:
 
 
 @dataclass
+class HomeConfig:
+    # Control smart-home lights/scenes. Two backends:
+    #   * "shortcuts" (macOS only): maps an intent -> a macOS Shortcut name.
+    #   * "webhook" (any OS): maps an intent -> an HTTP request (URL or a dict
+    #     with url/method/headers/body/json). Works from a PC and can trigger an
+    #     iPhone automation (e.g. Pushcut) or Home Assistant.
+    # Leave backend empty to auto-pick: shortcuts on macOS, webhook elsewhere.
+    enabled: bool = True
+    backend: str = ""
+    shortcuts: dict[str, str] = field(default_factory=dict)
+    webhooks: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ShaderConfig:
     scanline_intensity: float = 0.85
     scanline_count: float = 400.0
@@ -178,6 +192,7 @@ class Config:
     brain: BrainConfig = field(default_factory=BrainConfig)
     conversation: ConversationConfig = field(default_factory=ConversationConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
+    home: HomeConfig = field(default_factory=HomeConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     log_level: str = "INFO"
 

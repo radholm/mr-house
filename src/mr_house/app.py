@@ -103,7 +103,7 @@ class MrHouse:
             max_turns=cfg.brain.max_history_turns,
             persist_path=persist_path,
         )
-        self.brain = Brain(cfg.brain, self.memory, self.tools)
+        self.brain = Brain(cfg.brain, self.memory, self.tools, home_cfg=cfg.home)
 
         # filler control
         self._filler_timer: Optional[threading.Timer] = None

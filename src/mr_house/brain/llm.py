@@ -114,11 +114,12 @@ class SentenceChunker:
 
 
 class Brain:
-    def __init__(self, cfg, memory, tools=None) -> None:
+    def __init__(self, cfg, memory, tools=None, home_cfg=None) -> None:
         self.cfg = cfg
         self.memory = memory
         self.tools = tools                       # MCP tool manager (may be None)
-        self.local_tools = LocalToolRegistry()   # built-in tools (weather, time)
+        # built-in tools (weather, time, lore, Apple Home lights, ...)
+        self.local_tools = LocalToolRegistry(home_cfg=home_cfg)
         self._client = None
         if ollama is not None:
             try:
@@ -343,6 +344,9 @@ _TOOL_HINTS = (
     "caesar", "legion", "the strip", "lucky 38", "securitron", "courier",
     "brotherhood of steel", "enclave", "vault", "robco", "great war",
     "three families", "boomers", "powder gangers", "deathclaw", "pip-boy",
+    # Apple Home control -> control_lights.
+    "light", "lights", "lamp", "lamps", "dim", "brighten", "brightness",
+    "turn on", "turn off", "switch on", "switch off", "scene",
 )
 
 
