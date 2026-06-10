@@ -34,18 +34,29 @@ except Exception as exc:  # pragma: no cover
 
 _SHADER_DIR = Path(__file__).parent / "shaders"
 
-# Fullscreen quad: position (x, y) + uv (u, v). Note v is flipped so the image
-# is upright (textures are bottom-left origin).
-_QUAD = np.array(
-    [
-        # x,    y,    u,   v
-        -1.0, -1.0, 0.0, 1.0,
-        1.0, -1.0, 1.0, 1.0,
-        -1.0,  1.0, 0.0, 0.0,
-        1.0,  1.0, 1.0, 0.0,
-    ],
-    dtype="f4",
-)
+
+def _make_quad(view_w: int, view_h: int, img_w: int, img_h: int) -> np.ndarray:
+    """A screen quad whose position is scaled to preserve the image's aspect
+    ratio inside the view (letterbox/pillarbox), so the portrait never stretches
+    — important in fullscreen where the screen shape differs from the image."""
+    sx, sy = 1.0, 1.0
+    if view_w > 0 and view_h > 0 and img_w > 0 and img_h > 0:
+        view_aspect = view_w / view_h
+        img_aspect = img_w / img_h
+        if view_aspect > img_aspect:
+            sx = img_aspect / view_aspect      # pillarbox (bars left/right)
+        else:
+            sy = view_aspect / img_aspect      # letterbox (bars top/bottom)
+    return np.array(
+        [
+            # x,     y,    u,   v   (v flipped so the image is upright)
+            -sx, -sy, 0.0, 1.0,
+            sx, -sy, 1.0, 1.0,
+            -sx,  sy, 0.0, 0.0,
+            sx,  sy, 1.0, 0.0,
+        ],
+        dtype="f4",
+    )
 
 
 def _placeholder_image(w: int, h: int) -> "pygame.Surface":
@@ -78,6 +89,13 @@ class CRTDisplay:
         self._smoothed_glitch = 0.0
         self._render_w = cfg.width
         self._render_h = cfg.height
+        # Runtime fullscreen state (toggleable with F11). Seeded from config.
+        self._fullscreen = bool(getattr(cfg, "fullscreen", False))
+        self._surface = None          # raw loaded portrait (reused on toggle)
+        self._img_w = cfg.width
+        self._img_h = cfg.height
+        self._tex_w = cfg.width
+        self._tex_h = cfg.height
 
     # ---------------------------------------------------------------- setup
     def _load_surface(self) -> "pygame.Surface":
@@ -115,19 +133,21 @@ class CRTDisplay:
         pygame.init()
         pygame.display.set_caption("Mr. House")
 
-        # Load the portrait first so we can size the window to its aspect ratio.
-        surface = self._load_surface()
-        img_w, img_h = surface.get_size()
-        if self.cfg.fullscreen:
-            # In fullscreen we can't choose the window dimensions; render at the
-            # configured size (the shader still fills the screen).
-            render_w, render_h = self.cfg.width, self.cfg.height
-        else:
-            render_w, render_h = self._fit_to_aspect(img_w, img_h)
-        self._render_w, self._render_h = render_w, render_h
+        # Load the portrait once; keep it so we can rebuild the texture when the
+        # window is toggled between windowed and fullscreen at runtime.
+        self._surface = self._load_surface()
+        self._img_w, self._img_h = self._surface.get_size()
+        # Texture resolution = the windowed fit size (consistent quality in both
+        # modes; the quad handles aspect/letterboxing).
+        self._tex_w, self._tex_h = self._fit_to_aspect(self._img_w, self._img_h)
 
+        self._create_gl()
+
+    def _create_gl(self) -> None:
+        """(Re)create the window, GL context and resources for the current mode.
+        Safe to call again to switch between windowed and fullscreen."""
         # macOS only exposes OpenGL 3.3+ via a *forward-compatible Core* profile,
-        # and these attributes MUST be set before create the window, otherwise
+        # and these attributes MUST be set before creating the window, otherwise
         # we get a legacy 2.1 context and moderngl reports "got version 0".
         gl = pygame.display
         gl.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
@@ -145,27 +165,31 @@ class CRTDisplay:
         gl.gl_set_attribute(pygame.GL_DEPTH_SIZE, 24)
 
         flags = pygame.OPENGL | pygame.DOUBLEBUF
-        if self.cfg.fullscreen:
+        if self._fullscreen:
             flags |= pygame.FULLSCREEN
-        self._screen = pygame.display.set_mode(
-            (render_w, render_h), flags
-        )
+            size = (0, 0)  # 0,0 = use the desktop resolution
+        else:
+            size = (self._tex_w, self._tex_h)
+        self._screen = pygame.display.set_mode(size, flags)
+        view_w, view_h = self._screen.get_size()
+        self._render_w, self._render_h = view_w, view_h
         self._ctx = moderngl.create_context(require=330)
 
         vert = (_SHADER_DIR / "crt.vert").read_text()
         frag = (_SHADER_DIR / "crt.frag").read_text()
         self._prog = self._ctx.program(vertex_shader=vert, fragment_shader=frag)
 
-        vbo = self._ctx.buffer(_QUAD.tobytes())
+        quad = _make_quad(view_w, view_h, self._img_w, self._img_h)
+        vbo = self._ctx.buffer(quad.tobytes())
         self._vao = self._ctx.vertex_array(
             self._prog, [(vbo, "2f 2f", "in_vert", "in_uv")]
         )
 
-        # Scale the portrait to the render size (same aspect ratio, so no
-        # distortion) and upload it as the texture.
-        surface = pygame.transform.smoothscale(surface, (render_w, render_h))
+        # Scale the portrait to the texture size (same aspect ratio, no
+        # distortion) and upload it.
+        surface = pygame.transform.smoothscale(self._surface, (self._tex_w, self._tex_h))
         rgb = pygame.image.tostring(surface, "RGB", False)
-        self._tex = self._ctx.texture((render_w, render_h), 3, rgb)
+        self._tex = self._ctx.texture((self._tex_w, self._tex_h), 3, rgb)
         self._tex.build_mipmaps()
         self._tex.repeat_x = False
         self._tex.repeat_y = False
@@ -180,6 +204,31 @@ class CRTDisplay:
         self._set("u_vignette", sh.vignette)
         self._set("u_flicker", sh.flicker)
         self._set("u_curvature", sh.curvature)
+
+    def _release_gl(self) -> None:
+        for obj in (self._tex, self._vao, self._prog, self._ctx):
+            try:
+                if obj is not None:
+                    obj.release()
+            except Exception:
+                pass
+        self._tex = self._vao = self._prog = self._ctx = None
+
+    def _toggle_fullscreen(self) -> None:
+        """Switch between windowed and fullscreen at runtime (F11)."""
+        self._fullscreen = not self._fullscreen
+        try:
+            self._release_gl()
+            self._create_gl()
+            log.info("Display: %s", "fullscreen" if self._fullscreen else "windowed")
+        except Exception as exc:
+            log.error("Failed to toggle fullscreen (%s); reverting.", exc)
+            self._fullscreen = not self._fullscreen
+            try:
+                self._release_gl()
+                self._create_gl()
+            except Exception:
+                self._stop = True
 
     def _set(self, name: str, value) -> None:
         if self._prog is not None and name in self._prog:
@@ -210,14 +259,20 @@ class CRTDisplay:
         clock = pygame.time.Clock()
         sh = self.cfg.shader
         start = time.time()
-        log.info("Display running. Press ESC or close window to quit.")
+        log.info("Display running. F11 toggles fullscreen; ESC or close to quit.")
 
         while not self._stop:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._stop = True
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    self._stop = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self._stop = True
+                    elif event.key == pygame.K_F11 or (
+                        event.key == pygame.K_f and (event.mod & pygame.KMOD_META
+                                                     or event.mod & pygame.KMOD_CTRL)
+                    ):
+                        self._toggle_fullscreen()
 
             speaking = bool(self._glitch_provider and self._glitch_provider())
             target = sh.glitch_amount * (sh.glitch_speaking_boost if speaking else 1.0)

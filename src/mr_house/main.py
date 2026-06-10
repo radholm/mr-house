@@ -212,6 +212,8 @@ def main(argv=None) -> int:
     parser.add_argument("--config", default=None, help="Path to config.yaml")
     parser.add_argument("--check", action="store_true", help="Report subsystem availability and exit")
     parser.add_argument("--no-display", action="store_true", help="Run without the CRT window")
+    parser.add_argument("--fullscreen", action="store_true", help="Start the display in fullscreen (toggle at runtime with F11)")
+    parser.add_argument("--windowed", action="store_true", help="Force windowed mode (override config fullscreen)")
     parser.add_argument("--text", action="store_true", help="Text-only brain test (no audio/display)")
     parser.add_argument("--list-devices", action="store_true", help="List audio input/output devices and exit")
     parser.add_argument("--mic-test", action="store_true", help="Live mic level + wake-word score meter")
@@ -219,6 +221,12 @@ def main(argv=None) -> int:
 
     cfg = load_config(args.config)
     _setup_logging(cfg.log_level)
+
+    # CLI overrides for the display mode.
+    if args.fullscreen:
+        cfg.display.fullscreen = True
+    elif args.windowed:
+        cfg.display.fullscreen = False
 
     if args.list_devices:
         return _list_devices()

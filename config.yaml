@@ -147,7 +147,7 @@ display:
   # image's aspect ratio (no stretching) and fit within these bounds.
   width: 900
   height: 1100
-  fullscreen: false
+  fullscreen: true
   fps: 60
   shader:
     scanline_intensity: 0.35

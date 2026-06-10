@@ -7,6 +7,7 @@ Adds ``src`` to the path (so you can run without installing) and delegates to
     python run.py            # full experience (voice + CRT display)
     python run.py --check     # report which subsystems are available
     python run.py --no-display
+    python run.py --fullscreen # start in fullscreen (toggle live with F11)
     python run.py --text      # type questions to test the brain
 """
 

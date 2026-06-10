@@ -190,13 +190,75 @@ _WMO = {
 }
 
 
-def _get_weather(location: str = "", **_: Any) -> str:
-    """Current weather for *location* via Open-Meteo (no API key needed)."""
+_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4,
+    "saturday": 5, "sunday": 6, "mon": 0, "tue": 1, "tues": 1, "wed": 2,
+    "thu": 3, "thur": 3, "thurs": 3, "fri": 4, "sat": 5, "sun": 6,
+}
+
+
+def _parse_day_offset(day: str):
+    """Turn a spoken day ('today', 'tomorrow', 'friday', 'in 3 days', a date)
+    into a number of days ahead (0 = today). Returns None if unrecognized."""
+    if not day:
+        return 0
+    d = day.strip().lower()
+    if d in ("", "today", "now", "tonight", "this morning", "this afternoon",
+             "this evening", "current", "currently"):
+        return 0
+    if d in ("tomorrow", "tmr", "tmrw", "tomorow"):
+        return 1
+    if "day after tomorrow" in d:
+        return 2
+    m = _re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", d)
+    if m:
+        try:
+            target = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            off = (target - _dt.date.today()).days
+            if 0 <= off <= 15:
+                return off
+        except ValueError:
+            pass
+    m = _re.search(r"(\d+)\s*day", d)
+    if m:
+        off = int(m.group(1))
+        return off if 0 <= off <= 15 else None
+    for name, idx in _WEEKDAYS.items():
+        if _re.search(r"\b" + name + r"\b", d):
+            off = (idx - _dt.date.today().weekday()) % 7
+            if off == 0 and "next" in d:
+                off = 7   # "next monday" while it's Monday -> a week ahead
+            return off
+    return None
+
+
+def _day_label(offset: int, date: "_dt.date") -> str:
+    if offset == 0:
+        return "today"
+    if offset == 1:
+        return "tomorrow"
+    return date.strftime("%A")
+
+
+def _round_num(v):
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return v
+
+
+def _get_weather(location: str = "", day: str = "", **_: Any) -> str:
+    """Weather for *location* via Open-Meteo (no API key). With *day* set to an
+    upcoming day ('tomorrow', 'friday', 'in 3 days', a date) it returns that
+    day's forecast; otherwise it returns today's current conditions."""
     if requests is None:
         return "The weather service library is unavailable."
     location = (location or "").strip()
     if not location:
         return "I need a place name to check the weather."
+    offset = _parse_day_offset(day or "")
+    if offset is None:
+        offset = 0
     try:
         # 1) geocode the place name -> lat/lon
         geo = requests.get(
@@ -209,55 +271,95 @@ def _get_weather(location: str = "", **_: Any) -> str:
             return f"I couldn't find a place called {location}."
         place = results[0]
         lat, lon = place["latitude"], place["longitude"]
-        # City + country only — concise and natural for speech (skip the verbose
-        # admin region like "Stockholm County" / "Île-de-France Region").
-        nice = ", ".join(
-            p for p in [place.get("name"), place.get("country")] if p
-        )
+        # City + country only — concise and natural for speech.
+        nice = ", ".join(p for p in [place.get("name"), place.get("country")] if p)
 
-        # 2) current conditions
-        wx = requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
-                           "wind_speed_10m,weather_code",
-                "timezone": "auto",
-            },
-            timeout=8,
-        ).json()
-        cur = wx.get("current", {})
-        if not cur:
-            return f"I couldn't retrieve current conditions for {nice}."
-        code = int(cur.get("weather_code", -1))
-        desc = _WMO.get(code, "unclear conditions")
-
-        def _round(v):
-            try:
-                return int(round(float(v)))
-            except (TypeError, ValueError):
-                return v
-
-        temp = _round(cur.get("temperature_2m"))
-        feels = _round(cur.get("apparent_temperature"))
-        hum = _round(cur.get("relative_humidity_2m"))
-        wind = _round(cur.get("wind_speed_10m"))
-        # Explicit, spoken-friendly data plus a directive so the model always
-        # relays the actual numbers instead of vaguely saying "it's pleasant".
-        return (
-            f"Weather data for {nice} — "
-            f"conditions: {desc}; "
-            f"temperature: {temp} degrees Celsius; "
-            f"feels like: {feels} degrees; "
-            f"humidity: {hum} percent; "
-            f"wind: {wind} kilometers per hour. "
-            f"Tell the user the place, the temperature in degrees, and the "
-            f"conditions, stating these exact numbers."
-        )
+        if offset == 0:
+            return _weather_today(lat, lon, nice)
+        return _weather_forecast(lat, lon, nice, offset)
     except Exception as exc:
         log.error("Weather lookup failed: %s", exc)
         return f"I had trouble reaching the weather service for {location}."
+
+
+def _weather_today(lat, lon, nice: str) -> str:
+    wx = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
+                       "wind_speed_10m,weather_code",
+            "timezone": "auto",
+        },
+        timeout=8,
+    ).json()
+    cur = wx.get("current", {})
+    if not cur:
+        return f"I couldn't retrieve current conditions for {nice}."
+    desc = _WMO.get(int(cur.get("weather_code", -1)), "unclear conditions")
+    temp = _round_num(cur.get("temperature_2m"))
+    feels = _round_num(cur.get("apparent_temperature"))
+    hum = _round_num(cur.get("relative_humidity_2m"))
+    wind = _round_num(cur.get("wind_speed_10m"))
+    return (
+        f"Weather data for {nice} today — "
+        f"conditions: {desc}; "
+        f"temperature: {temp} degrees Celsius; "
+        f"feels like: {feels} degrees; "
+        f"humidity: {hum} percent; "
+        f"wind: {wind} kilometers per hour. "
+        f"Tell the user the place, the temperature in degrees, and the "
+        f"conditions, stating these exact numbers."
+    )
+
+
+def _weather_forecast(lat, lon, nice: str, offset: int) -> str:
+    wx = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
+                     "apparent_temperature_max,precipitation_probability_max,"
+                     "wind_speed_10m_max",
+            "timezone": "auto",
+            "forecast_days": min(16, offset + 1),
+        },
+        timeout=8,
+    ).json()
+    daily = wx.get("daily", {})
+    times = daily.get("time", [])
+    if not times or offset >= len(times):
+        return f"I can't forecast that far ahead for {nice}."
+
+    def at(key):
+        vals = daily.get(key) or []
+        return vals[offset] if offset < len(vals) else None
+
+    try:
+        target = _dt.date.fromisoformat(times[offset])
+    except (ValueError, TypeError):
+        target = _dt.date.today() + _dt.timedelta(days=offset)
+    label = _day_label(offset, target)
+    when = label if offset <= 1 else f"on {label}"
+    desc = _WMO.get(int(at("weather_code") or -1), "unclear conditions")
+    tmax = _round_num(at("temperature_2m_max"))
+    tmin = _round_num(at("temperature_2m_min"))
+    feels = _round_num(at("apparent_temperature_max"))
+    precip = _round_num(at("precipitation_probability_max"))
+    wind = _round_num(at("wind_speed_10m_max"))
+    return (
+        f"Weather forecast for {nice} {when} — "
+        f"conditions: {desc}; "
+        f"high: {tmax} degrees Celsius; "
+        f"low: {tmin} degrees; "
+        f"feels like up to: {feels} degrees; "
+        f"chance of precipitation: {precip} percent; "
+        f"wind up to: {wind} kilometers per hour. "
+        f"Tell the user the place, the day, the high and low temperatures, and "
+        f"the conditions, stating these exact numbers."
+    )
 
 
 def _get_time(**_: Any) -> str:
@@ -414,16 +516,23 @@ class LocalToolRegistry:
         )
         self._register(
             name="get_weather",
-            description="Get the CURRENT weather conditions for a city or place. "
-                        "Use this for any question about current weather, temperature, "
-                        "or conditions. Do not use a web fetch for weather.",
+            description="Get the weather for a city or place. By default returns "
+                        "today's current conditions; set 'day' for an upcoming "
+                        "day's forecast. Use this for any question about weather, "
+                        "temperature, or conditions.",
             parameters={
                 "type": "object",
                 "properties": {
                     "location": {
                         "type": "string",
                         "description": "City and optionally country, e.g. 'Stockholm' or 'Paris, France'.",
-                    }
+                    },
+                    "day": {
+                        "type": "string",
+                        "description": "Optional. The day to forecast, e.g. 'today' "
+                                       "(default), 'tomorrow', 'Friday', 'in 3 days', "
+                                       "or a date like '2026-06-13'. Omit for today.",
+                    },
                 },
                 "required": ["location"],
             },

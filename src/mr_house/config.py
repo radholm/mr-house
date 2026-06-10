@@ -162,7 +162,7 @@ class DisplayConfig:
     image: str = "src/mr_house/assets/house.png"
     width: int = 900
     height: int = 1100
-    fullscreen: bool = False
+    fullscreen: bool = True
     fps: int = 60
     shader: ShaderConfig = field(default_factory=ShaderConfig)
 
