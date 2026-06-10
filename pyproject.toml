@@ -1,0 +1,17 @@
+[project]
+name = "mr-house"
+version = "0.1.0"
+description = "A local-first, low-latency voice assistant with a CRT-glitch persona."
+requires-python = ">=3.10"
+readme = "README.md"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mr_house" = ["assets/**/*", "display/shaders/*"]
+

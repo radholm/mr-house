@@ -1,0 +1,148 @@
+# ============================================================================
+#  Mr. House — configuration
+#  Every subsystem reads from here. Paths are relative to the repo root unless
+#  absolute. Anything missing falls back to a sensible default in config.py.
+# ============================================================================
+
+# ---------------------------------------------------------------- audio I/O
+audio:
+  sample_rate: 16000        # capture rate (whisper + openWakeWord want 16k)
+  block_size: 1280          # frames per mic block (~80ms @ 16k)
+  input_device: null        # null = system default; or an index/substring
+  output_device: null       # null = system default
+  output_sample_rate: 22050 # Piper voices are usually 22050
+
+# ------------------------------------------------------------- wake word
+wake_word:
+  enabled: true
+  # openWakeWord model names or paths to custom .onnx/.tflite models.
+  # Ship custom "mr_house"/"house" models here; falls back to bundled words.
+  models:
+    - "hey_jarvis"          # placeholder until a custom "mr_house" model exists
+  # Lower = more sensitive (easier to trigger) but more false wakes. Watch the
+  # live "best wake score" in the logs (or `python run.py --mic-test`) to tune.
+  threshold: 0.4
+  # Spoken / printed acknowledgements when triggered.
+  vad_threshold: 0.3
+
+# -------------------------------------------------------------------- vad
+# Used to detect the end of the user's utterance after wake.
+vad:
+  aggressiveness: 2         # 0..3 (webrtcvad); higher = more aggressive
+  silence_ms: 1000          # wait this long after you stop before answering
+                            # (higher = more patient with pauses, but slower to
+                            #  respond; lower = snappier. 800-1200 is a good range)
+  max_utterance_ms: 20000   # hard cap on a single question
+  start_timeout_ms: 6000    # give up if no speech starts after wake
+  start_speech_ms: 150      # need this much sustained voice to start recording
+                            # (rejects brief noise blips that trip the detector)
+  min_voiced_ms: 350        # an utterance needs at least this much real speech,
+                            # else it's discarded as noise (stops Whisper from
+                            # hallucinating "thank you" out of silence)
+
+# -------------------------------------------------------------------- stt
+stt:
+  enabled: true
+  # base.en is fastest but fragile on real mic audio (mishears words); small.en
+  # is much more robust to noise/accents and still well under 1s. Options:
+  # tiny.en < base.en < distil-small.en < small.en < medium.en (accuracy/slower).
+  model: "small.en"
+  device: "auto"            # auto/cpu/cuda
+  compute_type: "int8"      # int8 is fast on CPU; float16 on GPU
+  language: "en"
+  beam_size: 5              # 1 = greedy/fastest; 5 = a bit slower, more accurate
+  cpu_threads: 0            # 0 = use all CPU cores
+  vad_filter: false         # we already trim the utterance; skip the extra pass
+
+# -------------------------------------------------------------------- tts
+tts:
+  enabled: true
+  engine: "piper"
+  # Path to a Piper voice (.onnx). The matching .onnx.json must sit beside it.
+  voice: "src/mr_house/assets/voices/en_US-ryan-high.onnx"
+  length_scale: 0.95        # <1 = faster speech
+  noise_scale: 0.667
+  noise_w: 0.8
+  sentence_silence: 0.15    # seconds of silence between sentences
+
+# --------------------------------------------------------------- voice FX
+# Applied to every synthesized chunk before playback (Spotify pedalboard).
+voice_fx:
+  enabled: true
+  highpass_hz: 90
+  lowpass_hz: 7000
+  # Parametric EQ bands: [freq_hz, gain_db, q]
+  eq:
+    - [200, -2.0, 0.7]
+    - [2500, 3.0, 1.0]
+    - [5000, 1.5, 1.2]
+  distortion_db: 4.0        # subtle radio grit; 0 to disable
+  reverb:
+    room_size: 0.45         # bigger = longer, roomier tail
+    damping: 0.5
+    wet_level: 0.28         # how much reverb is mixed in
+    dry_level: 0.85
+  bitcrush_depth: 0         # 0 disables; e.g. 12 for a vintage feel
+
+# ------------------------------------------------------------------ brain
+brain:
+  provider: "ollama"
+  model: "llama3.2:3b"      # small, fast, supports tool-calling
+  host: "http://localhost:11434"
+  temperature: 0.7
+  max_history_turns: 12     # rolling memory size
+  num_ctx: 4096
+  # If the first token takes longer than this, speak a filler line.
+  filler_after_ms: 600
+  # Hard limit on tool-call iterations per question.
+  max_tool_iterations: 4
+  # Remember conversations across restarts (rolling window, saved to disk).
+  persist_memory: true
+  memory_file: "data/memory.json"
+
+# ------------------------------------------------------------ conversation
+# After Mr. House answers, he keeps listening for a follow-up so you don't have
+# to repeat the wake word every time.
+conversation:
+  followup_enabled: true
+  followup_window_ms: 8000   # how long to wait for a follow-up after answering
+  max_followups: 0           # 0 = unlimited while you keep talking
+
+# --------------------------------------------------------------- mcp tools
+# Each entry launches an MCP server over stdio. Tools are auto-discovered and
+# exposed to the model. Comment these out if you don't have them installed.
+mcp:
+  enabled: true
+  servers:
+    # Web fetch (https://github.com/modelcontextprotocol/servers)
+    fetch:
+      command: "uvx"
+      args: ["mcp-server-fetch"]
+    # Example weather server (swap for whatever you run locally)
+    # weather:
+    #   command: "uvx"
+    #   args: ["mcp-server-weather"]
+    #   env:
+    #     WEATHER_API_KEY: "${WEATHER_API_KEY}"
+
+# ---------------------------------------------------------------- display
+display:
+  enabled: true
+  image: "src/mr_house/assets/house.png"
+  width: 900
+  height: 1100
+  fullscreen: false
+  fps: 60
+  shader:
+    scanline_intensity: 0.35
+    scanline_count: 800.0
+    chromatic_aberration: 0.0025
+    vignette: 0.35
+    flicker: 0.04
+    glitch_amount: 0.6        # strength of glitch bursts
+    glitch_speaking_boost: 2.5 # glitch harder while Mr. House talks
+    curvature: 0.06           # CRT barrel distortion
+
+# --------------------------------------------------------------- logging
+log_level: "INFO"
+

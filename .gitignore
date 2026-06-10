@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.onnx
+*.onnx.json
+*.tflite
+src/mr_house/assets/voices/*
+!src/mr_house/assets/voices/.gitkeep
+src/mr_house/assets/house.png
+data/
+.DS_Store
+.idea/
+*.iml
+

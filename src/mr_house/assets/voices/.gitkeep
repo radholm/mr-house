@@ -1,0 +1,4 @@
+# Put Piper voice files here (.onnx and matching .onnx.json).
+# Example: en_US-ryan-high.onnx + en_US-ryan-high.onnx.json
+# Voices: https://github.com/rhasspy/piper/blob/master/VOICES.md
+
