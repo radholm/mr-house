@@ -1,5 +1,8 @@
 # Mr. House 🃏
 
+<!-- Replace OWNER/REPO with your GitHub path to activate the badge. -->
+[![CI](https://github.com/radholm/mr-house/actions/workflows/ci.yml/badge.svg)](https://github.com/radholm/mr-house/actions/workflows/ci.yml)
+
 A low-latency, **local-first** voice assistant inspired by *Mr. House*. Say the wake
 word ("Mr. House" / "House"), ask a question, and he answers back in a custom,
 effected voice — while a single static portrait glitches and flickers behind a
@@ -42,16 +45,18 @@ CRT scanline shader.
 
 ## Quick start
 
-> Easiest path: run `./scripts/setup.sh` (macOS/Linux). It picks a Python 3.10+
-> interpreter, installs system + Python deps, downloads a Piper voice and the
-> openWakeWord models, and pulls the Ollama model. Then skip to step 4.
+> Easiest path: run `./scripts/setup.sh` (macOS/Linux) or
+> `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` (Windows). It
+> picks a Python 3.10+ interpreter, installs system + Python deps, downloads a
+> Piper voice and the openWakeWord models, and pulls the Ollama model. Then skip
+> to step 4.
 
 ### 1. System dependencies
 
 Requires **Python 3.10+** (3.9 is too old for several deps).
 
+**macOS**
 ```bash
-# macOS
 brew install python@3.13 portaudio uv   # uv provides uvx for MCP servers
 brew install --cask ollama-app          # the official app (the 'ollama' formula
                                         # has shipped without the llama-server runner)
@@ -59,11 +64,27 @@ ollama serve &                          # start the local LLM server
 ollama pull llama3.2:3b                  # a small, fast, tool-capable model
 ```
 
+**Windows** (PowerShell)
+```powershell
+winget install Python.Python.3.13 astral-sh.uv Ollama.Ollama
+# PortAudio ships inside the sounddevice wheel — nothing extra to install.
+# Ollama runs in the background automatically after install.
+ollama pull llama3.2:3b
+```
+
 ### 2. Python environment
 
+**macOS / Linux**
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Windows** (PowerShell)
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -122,10 +143,13 @@ time. Check `python run.py --check` to see which subsystems are available.
 - **He talks over himself / answers several times** — you probably have more than
   one instance running (e.g. an earlier run that didn't exit). A live run now
   takes a **single-instance lock** and refuses to start a second copy. To clear
-  stragglers: `pkill -f run.py`.
+  stragglers: `pkill -f run.py` (macOS/Linux) or `taskkill /F /IM python.exe`
+  (Windows, or just use Task Manager).
 - **Wake word won't trigger** — run `python run.py --mic-test` to see your live
   mic level + wake score, and lower `wake_word.threshold` in `config.yaml` to
-  taste. On macOS, make sure your terminal/IDE has Microphone permission.
+  taste. On macOS, make sure your terminal/IDE has Microphone permission; on
+  Windows, allow microphone access under Settings > Privacy & security >
+  Microphone.
 - **Can't exit** — press `ESC` / close the window, or `Ctrl+C` in the terminal
   (a second `Ctrl+C` force-quits). Note: processes started in the background with
   `&` have `SIGINT` ignored by the shell — use `pkill -f run.py` for those.

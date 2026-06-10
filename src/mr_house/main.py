@@ -27,19 +27,29 @@ def _acquire_single_instance_lock() -> bool:
     """Return True if we got the lock; False if another instance is running.
 
     Prevents multiple Mr. Houses from running at once — otherwise several
-    instances all hear the wake word and answer over each other.
+    instances all hear the wake word and answer over each other. Works on both
+    POSIX (fcntl) and Windows (msvcrt).
     """
     global _LOCK_HANDLE
-    import fcntl
 
     lock_path = os.path.join(tempfile.gettempdir(), "mr_house.lock")
     try:
         fh = open(lock_path, "w")
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.name == "nt":  # Windows
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:  # POSIX
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         return False
-    fh.write(str(os.getpid()))
-    fh.flush()
+    try:
+        fh.write(str(os.getpid()))
+        fh.flush()
+    except OSError:
+        pass
     _LOCK_HANDLE = fh  # keep reference so the lock is held
     return True
 

@@ -14,6 +14,7 @@ voice pipeline still runs headless.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -103,10 +104,12 @@ class CRTDisplay:
         gl.gl_set_attribute(
             pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE
         )
-        # Forward-compatible flag is required on macOS Core profiles.
-        fwd = getattr(pygame, "GL_CONTEXT_FORWARD_COMPATIBLE_FLAG", None)
-        if fwd is not None:
-            gl.gl_set_attribute(fwd, 1)
+        # The forward-compatible flag is REQUIRED for a Core profile on macOS, but
+        # can be needlessly strict on some Windows drivers — so only set it there.
+        if sys.platform == "darwin":
+            fwd = getattr(pygame, "GL_CONTEXT_FORWARD_COMPATIBLE_FLAG", None)
+            if fwd is not None:
+                gl.gl_set_attribute(fwd, 1)
         gl.gl_set_attribute(pygame.GL_DOUBLEBUFFER, 1)
         gl.gl_set_attribute(pygame.GL_DEPTH_SIZE, 24)
 

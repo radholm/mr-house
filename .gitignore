@@ -8,7 +8,6 @@ venv/
 *.tflite
 src/mr_house/assets/voices/*
 !src/mr_house/assets/voices/.gitkeep
-src/mr_house/assets/house.png
 data/
 .DS_Store
 .idea/

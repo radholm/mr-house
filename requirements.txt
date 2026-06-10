@@ -13,7 +13,11 @@ soundfile>=0.12         # wav decode/encode
 openwakeword>=0.6.0
 
 # --- VAD (end-of-utterance) ---
-webrtcvad>=2.0.10
+# webrtcvad builds from source (needs a C compiler). On Windows use the prebuilt
+# 'webrtcvad-wheels' so no MSVC build tools are required; both expose the same
+# `import webrtcvad`.
+webrtcvad>=2.0.10; platform_system != "Windows"
+webrtcvad-wheels>=2.0.14; platform_system == "Windows"
 
 # --- STT (local) ---
 faster-whisper>=1.0.0
