@@ -42,6 +42,27 @@ except Exception as exc:  # pragma: no cover
 # single '.'), ignoring dots that are part of an ellipsis and the '…' char.
 _SENTENCE_END = re.compile(r"([!?]+|(?<!\.)\.(?!\.))(\s+)")
 
+# Abbreviations whose trailing '.' must NOT be treated as a sentence end, or we
+# split mid-phrase (e.g. "Mr." in "Mr. House"). Matched case-insensitively
+# against the word immediately before the period. Single letters (initials like
+# "J." in "J. R. R.") are also treated as non-terminal.
+_ABBREVIATIONS = {
+    "mr", "mrs", "ms", "messrs", "mme", "mlle", "dr", "prof", "st", "mt",
+    "sr", "jr", "vs", "etc", "inc", "ltd", "co", "corp", "gen", "col",
+    "sgt", "lt", "capt", "cmdr", "rev", "hon", "pres", "gov", "sen", "rep",
+    "no", "vol", "fig", "approx", "dept", "est", "min", "max", "e.g", "i.e",
+}
+_LAST_WORD = re.compile(r"([A-Za-z]+)$")
+
+
+def _is_abbreviation(text_before: str) -> bool:
+    """True if *text_before* ends with a known abbreviation or single initial."""
+    m = _LAST_WORD.search(text_before)
+    if not m:
+        return False
+    word = m.group(1).lower()
+    return word in _ABBREVIATIONS or len(word) == 1
+
 
 class SentenceChunker:
     """Accumulate streamed text and yield speakable sentences."""
@@ -55,13 +76,7 @@ class SentenceChunker:
         self._buf += text
         # Emit on newlines too.
         while True:
-            match = _SENTENCE_END.search(self._buf)
-            nl = self._buf.find("\n")
-            cut = None
-            if match and match.end() >= self.min_chars:
-                cut = match.end()
-            if nl != -1 and (cut is None or nl < cut):
-                cut = nl + 1
+            cut = self._next_cut()
             if cut is None:
                 break
             sentence = self._buf[:cut].strip()
@@ -69,6 +84,28 @@ class SentenceChunker:
             if sentence:
                 out.append(sentence)
         return out
+
+    def _next_cut(self) -> Optional[int]:
+        """Index to cut the buffer at, or None if no complete sentence yet."""
+        search_start = 0
+        cut: Optional[int] = None
+        while True:
+            match = _SENTENCE_END.search(self._buf, search_start)
+            if match is None:
+                break
+            # A single '.' right after an abbreviation ("Mr.") is not a real
+            # sentence end — skip it and keep looking further along.
+            if match.group(1) == "." and _is_abbreviation(self._buf[:match.start()]):
+                search_start = match.end()
+                continue
+            if match.end() >= self.min_chars:
+                cut = match.end()
+            break
+
+        nl = self._buf.find("\n")
+        if nl != -1 and (cut is None or nl < cut):
+            cut = nl + 1
+        return cut
 
     def flush(self) -> Optional[str]:
         rest = self._buf.strip()

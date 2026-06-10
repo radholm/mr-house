@@ -99,12 +99,14 @@ class TextToSpeech:
         noise_scale = self.noise_scale * (1.0 + random.uniform(-j, j))
         # Cadence/rhythm variability.
         noise_w = self.noise_w * (1.0 + random.uniform(-j, j))
-        # Pace — vary a bit less so timing stays natural.
-        length_scale = self.length_scale * (1.0 + random.uniform(-j, j) * 0.5)
+        # Pace — only ever vary toward *slower*, never faster, so he never
+        # rattles a sentence off. (Larger length_scale = slower speech.)
+        length_scale = self.length_scale * (1.0 + random.uniform(0.0, j) * 0.5)
 
         noise_scale = float(np.clip(noise_scale, 0.3, 1.2))
         noise_w = float(np.clip(noise_w, 0.4, 1.4))
-        length_scale = float(np.clip(length_scale, 0.8, 1.3))
+        # Floor at the configured pace so jitter can't make him faster.
+        length_scale = float(np.clip(length_scale, self.length_scale, 1.4))
 
         return SynthesisConfig(
             length_scale=length_scale,

@@ -60,7 +60,7 @@ tts:
   engine: "piper"
   # Path to a Piper voice (.onnx). The matching .onnx.json must sit beside it.
   voice: "src/mr_house/assets/voices/en_US-ryan-high.onnx"
-  length_scale: 1.0         # <1 = faster speech; ~1.0 reads more deliberate/natural
+  length_scale: 1.06        # <1 = faster speech; >1 = slower, more deliberate
   # Higher noise_scale = more pitch/prosody variation (less monotone, more emotion).
   noise_scale: 0.85
   # Higher noise_w = more varied phoneme timing/cadence (less mechanical rhythm).

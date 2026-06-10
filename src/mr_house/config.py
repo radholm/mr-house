@@ -84,7 +84,7 @@ class TTSConfig:
     enabled: bool = True
     engine: str = "piper"
     voice: str = "src/mr_house/assets/voices/en_US-ryan-high.onnx"
-    length_scale: float = 1.0
+    length_scale: float = 1.06
     noise_scale: float = 0.85
     noise_w: float = 0.95
     expressiveness: float = 0.12   # per-sentence prosody jitter (0 = off)
