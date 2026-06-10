@@ -1,31 +1,33 @@
 # Training a custom Mr. House voice (Piper)
 
-You have **one ~1-hour recording** of the target speaker. This guide takes you
-from that file to a working `en_US-house-medium.onnx` voice that drops straight
-into Mr. House.
+You have a set of separate voice clips of the target speaker. This guide takes
+you from those clips to a working `en_US-house-medium.onnx` voice that drops
+straight into Mr. House.
 
 There are two phases:
 
 1. **Prepare the dataset** (easy, do it on any machine — your Mac is fine).
 2. **Fine-tune & export** the voice (needs a GPU; on Windows use **WSL2**).
 
-> TL;DR: 1 hour of audio is enough for a good **fine-tune** of an existing medium
-> voice — *not* training from scratch. Always pass `--ckpt_path` with a medium
-> checkpoint.
+> TL;DR: a few hundred clean clips are enough for a good **fine-tune** of an
+> existing medium voice — *not* training from scratch. Always pass `--ckpt_path`
+> with a medium checkpoint.
 
 ---
 
 ## Phase 1 — Build the dataset
 
-Piper needs many short clips plus a `metadata.csv` (`filename|text`). The
-included script segments your long file, resamples to mono 22050 Hz, and
-auto-transcribes each clip.
+Piper needs a folder of short clips plus a `metadata.csv` (`filename|text`). If
+you already have **separate clips** (e.g. extracted game voice lines in `.ogg`),
+the included script transcribes each file, resamples to mono 22050 Hz, and writes
+the CSV.
 
 ```bash
 # from the repo root, in the project venv
-python scripts/prepare_voice_dataset.py \
-  --input /path/to/mr_house_1h.wav \
+python scripts/transcribe_clips.py \
+  --input-dir /path/to/mr_house_ogg \
   --out datasets/mr_house \
+  --pattern "*.ogg" \
   --whisper-model medium.en        # large-v3 = even better transcripts, slower
 ```
 
@@ -33,9 +35,14 @@ Output:
 
 ```
 datasets/mr_house/
-  wav/utt_0000.wav, utt_0001.wav, ...   # mono 22050 Hz, 16-bit
-  metadata.csv                          # utt_0000.wav|Text...
+  wav/<clip>.wav, ...                   # mono 22050 Hz, 16-bit (one per input clip)
+  metadata.csv                          # <clip>.wav|Text...
 ```
+
+Useful flags: `--recursive` (search sub-folders), `--rename` (use `utt_0000.wav`
+names instead of the originals), `--min-sec` / `--max-sec` (skip clips that are
+too short/long). Any format ffmpeg can read works (`.ogg`, `.wav`, `.mp3`,
+`.m4a`, `.flac`, `.opus`).
 
 **Then do the most important step:** open `metadata.csv` and **fix transcription
 mistakes**. ASR errors teach the model wrong pronunciations. Budget 30–60 min of
@@ -43,9 +50,10 @@ proof-reading — it's the single biggest quality lever. Also delete rows for an
 clip with music, noise, laughter, or overlapping speakers.
 
 Tips:
-- Aim for clips ~3–15s. Tune with `--min-sec` / `--max-sec`.
-- Want cleaner cuts? Increase `--pad-ms` slightly so words aren't clipped.
-- 1 hour typically yields ~400–800 usable clips. More clean data = better.
+- The clips are already separated, so each becomes one training utterance.
+  Ideal lengths are ~3–15s; very short single-word clips still help.
+- More clean, single-speaker data = better. A few hundred lines is plenty for a
+  solid fine-tune.
 
 ---
 
@@ -147,8 +155,8 @@ python3 -m piper.train fit \
   16–32 for more).
 - **`--ckpt_path`**: the medium checkpoint from 2.4 (fine-tune warm start).
 - Checkpoints are written under `lightning_logs/`. Training runs until you stop
-  it (Ctrl-C). For a 1-hour fine-tune, listen to samples and stop when it sounds
-  good — often a few thousand steps.
+  it (Ctrl-C). Listen to samples and stop when it sounds good — often a few
+  thousand steps for a fine-tune.
 - See all options: `python3 -m piper.train fit --help`.
 
 ### 2.7 Export to ONNX
