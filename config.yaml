@@ -188,16 +188,37 @@ display:
   width: 900
   height: 1100
   fullscreen: true
-  fps: 60
+  fps: 120
   shader:
-    scanline_intensity: 0.55
-    scanline_count: 200.0
+    scanline_intensity: 0.4
+    scanline_count: 150.0
     chromatic_aberration: 0.0025
-    vignette: 1.75
-    flicker: 0.06
-    glitch_amount: 0.1        # strength of glitch bursts
-    glitch_speaking_boost: 0.5 # glitch harder while Mr. House talks
-    curvature: 1.0           # CRT barrel distortion
+    vignette: 0.5
+    flicker: 0.02
+    glitch_amount: 0.05        # strength of glitch bursts
+    glitch_speaking_boost: 0.2 # glitch harder while Mr. House talks
+    curvature: 0.20           # CRT barrel distortion
+  hud:
+    enabled: true
+    font: "src/mr_house/assets/fonts/fixedsys.ttf"
+    font_size: 24              # global default; elements can override below
+    color: [120, 240, 160]      # RGB — green terminal look
+    padding: 20
+    # Clock
+    show_clock: true
+    clock_format: "%Y-%m-%d  %H:%M:%S"
+    clock_position: "top-right"
+    clock_font_size: 0         # 0 = use global font_size
+    # Watermark
+    show_watermark: true
+    watermark_text: "ROBCO INDUSTRIES (TM) TERMLINK PROTOCOL"
+    watermark_position: "top-left"
+    watermark_font_size: 0     # 0 = use global font_size
+    # Notifications
+    notification_duration: 8.0   # default seconds; each notification can override
+    notification_position: "bottom-left"  # where notifications appear
+    notification_sound: "src/mr_house/assets/sfx/notification.mp3"  # default sound; each notification can override; "" to disable
+    notification_volume: 0.7    # default volume 0.0–1.0; each notification can override
 
 # --------------------------------------------------------------- logging
 log_level: "INFO"

@@ -178,6 +178,18 @@ def _wikipedia_search(query: str, n: int) -> list[tuple[str, str, str]]:
         log.warning("Wikipedia search failed: %s", exc)
         return []
 
+def _push_weather_notification(text: str) -> None:
+    """Push weather data to the HUD notification system (safe even if display is off)."""
+    try:
+        from mr_house.display.hud import push_notification
+        push_notification(
+            text,
+            duration=36000.0,
+            sound="src/mr_house/assets/sfx/notification.mp3",
+            volume=1.0,
+        )
+    except Exception:
+        pass  # display may not be running; that's fine
 
 
 # WMO weather interpretation codes -> human text.
@@ -307,6 +319,15 @@ def _weather_today(lat, lon, nice: str) -> str:
     feels = _round_num(cur.get("apparent_temperature"))
     hum = _round_num(cur.get("relative_humidity_2m"))
     wind = _round_num(cur.get("wind_speed_10m"))
+
+    # Push weather data to the HUD as a notification.
+    _push_weather_notification(
+        f"[ WEATHER ] {nice}\n"
+        f"{desc.upper()}\n"
+        f"{temp}°C  (feels {feels}°C)\n"
+        f"Humidity {hum}%  |  Wind {wind} km/h"
+    )
+
     return (
         f"Weather data for {nice} today — "
         f"conditions: {desc}; "
@@ -354,6 +375,15 @@ def _weather_forecast(lat, lon, nice: str, offset: int) -> str:
     feels = _round_num(at("apparent_temperature_max"))
     precip = _round_num(at("precipitation_probability_max"))
     wind = _round_num(at("wind_speed_10m_max"))
+
+    # Push forecast data to the HUD as a notification.
+    _push_weather_notification(
+        f"[ FORECAST ] {nice} — {when}\n"
+        f"{desc.upper()}\n"
+        f"{tmin}°C — {tmax}°C  (feels {feels}°C)\n"
+        f"Precip {precip}%  |  Wind {wind} km/h"
+    )
+
     return (
         f"Weather forecast for {nice} {when} — "
         f"conditions: {desc}; "

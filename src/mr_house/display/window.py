@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 try:
     import pygame
+    import pygame.freetype
     import moderngl
 
     _HAVE_GL = True
@@ -131,6 +132,7 @@ class CRTDisplay:
 
     def _setup(self) -> None:
         pygame.init()
+        pygame.freetype.init()
         pygame.display.set_caption("Mr. House")
 
         # Load the portrait once; keep it so we can rebuild the texture when the
@@ -140,6 +142,10 @@ class CRTDisplay:
         # Texture resolution = the windowed fit size (consistent quality in both
         # modes; the quad handles aspect/letterboxing).
         self._tex_w, self._tex_h = self._fit_to_aspect(self._img_w, self._img_h)
+
+        # Initialise HUD (font loading via pygame.freetype BEFORE GL context).
+        from mr_house.display.hud import HUD
+        self._hud = HUD(self.cfg.hud, (self._tex_w, self._tex_h))
 
         self._create_gl()
 
@@ -169,11 +175,13 @@ class CRTDisplay:
             flags |= pygame.FULLSCREEN
             size = (0, 0)  # 0,0 = use the desktop resolution
         else:
+            flags |= pygame.RESIZABLE
             size = (self._tex_w, self._tex_h)
         self._screen = pygame.display.set_mode(size, flags)
         view_w, view_h = self._screen.get_size()
         self._render_w, self._render_h = view_w, view_h
         self._ctx = moderngl.create_context(require=330)
+        self._ctx.viewport = (0, 0, view_w, view_h)
 
         vert = (_SHADER_DIR / "crt.vert").read_text()
         frag = (_SHADER_DIR / "crt.frag").read_text()
@@ -220,6 +228,9 @@ class CRTDisplay:
         try:
             self._release_gl()
             self._create_gl()
+            # Resize HUD surface to match the new texture size.
+            if hasattr(self, "_hud") and self._hud is not None:
+                self._hud.resize((self._tex_w, self._tex_h))
             log.info("Display: %s", "fullscreen" if self._fullscreen else "windowed")
         except Exception as exc:
             log.error("Failed to toggle fullscreen (%s); reverting.", exc)
@@ -273,6 +284,18 @@ class CRTDisplay:
                                                      or event.mod & pygame.KMOD_CTRL)
                     ):
                         self._toggle_fullscreen()
+                elif event.type == pygame.VIDEORESIZE:
+                    # Handle window resize (e.g. after exiting fullscreen on some WMs)
+                    view_w, view_h = event.w, event.h
+                    if (view_w, view_h) != (self._render_w, self._render_h):
+                        self._render_w, self._render_h = view_w, view_h
+                        self._ctx.viewport = (0, 0, view_w, view_h)
+                        quad = _make_quad(view_w, view_h, self._img_w, self._img_h)
+                        vbo = self._ctx.buffer(quad.tobytes())
+                        self._vao.release()
+                        self._vao = self._ctx.vertex_array(
+                            self._prog, [(vbo, "2f 2f", "in_vert", "in_uv")]
+                        )
 
             speaking = bool(self._glitch_provider and self._glitch_provider())
             target = sh.glitch_amount * (sh.glitch_speaking_boost if speaking else 1.0)
@@ -281,6 +304,13 @@ class CRTDisplay:
 
             self._set("u_time", time.time() - start)
             self._set("u_glitch", self._smoothed_glitch)
+
+            # Composite HUD onto portrait and re-upload texture each frame.
+            frame = pygame.transform.smoothscale(self._surface, (self._tex_w, self._tex_h))
+            if hasattr(self, "_hud") and self._hud is not None:
+                self._hud.render(frame)
+            rgb = pygame.image.tostring(frame, "RGB", False)
+            self._tex.write(rgb)
 
             self._ctx.clear(0.0, 0.0, 0.0)
             self._tex.use(0)

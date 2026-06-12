@@ -171,6 +171,30 @@ class ShaderConfig:
 
 
 @dataclass
+class HUDConfig:
+    enabled: bool = True
+    font: str = "src/mr_house/assets/fonts/fixedsys.ttf"
+    font_size: int = 32
+    color: list[int] = field(default_factory=lambda: [0, 255, 100])
+    padding: int = 20
+    # Clock
+    show_clock: bool = True
+    clock_format: str = "%Y-%m-%d  %H:%M:%S"
+    clock_position: str = "top-right"
+    clock_font_size: int = 0  # 0 = use global font_size
+    # Watermark
+    show_watermark: bool = True
+    watermark_text: str = "MR. HOUSE v1.0"
+    watermark_position: str = "top-left"
+    watermark_font_size: int = 0  # 0 = use global font_size
+    # Notifications
+    notification_duration: float = 8.0  # default seconds; each notification can override
+    notification_position: str = "bottom-center"  # where notifications appear
+    notification_sound: str = "src/mr_house/assets/sfx/notification.mp3"  # default sound; each notification can override; "" to disable
+    notification_volume: float = 0.7  # default volume 0.0–1.0; each notification can override
+
+
+@dataclass
 class DisplayConfig:
     enabled: bool = True
     image: str = "src/mr_house/assets/house.png"
@@ -179,6 +203,7 @@ class DisplayConfig:
     fullscreen: bool = True
     fps: int = 60
     shader: ShaderConfig = field(default_factory=ShaderConfig)
+    hud: HUDConfig = field(default_factory=HUDConfig)
 
 
 @dataclass
