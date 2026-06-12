@@ -3,14 +3,8 @@ __pycache__/
 .venv/
 venv/
 .env
-*.onnx
-*.onnx.json
-*.tflite
-src/mr_house/assets/voices/*
-src/mr_house/assets/house.png
 data/
 datasets/
-*.ckpt
 .DS_Store
 .idea/
 *.iml
