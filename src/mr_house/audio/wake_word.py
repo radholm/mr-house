@@ -13,6 +13,7 @@ model so the pipeline still runs.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,24 @@ from typing import Optional
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+# --- tflite_runtime compatibility shim ---
+# Google discontinued tflite-runtime for Python 3.12+; the replacement is
+# ai-edge-litert which exposes the same Interpreter but under a different
+# module path. openwakeword does `import tflite_runtime.interpreter`, so we
+# register a shim module so that import succeeds.
+if "tflite_runtime" not in sys.modules:
+    try:
+        import importlib
+        _litert_interp = importlib.import_module("ai_edge_litert.interpreter")
+        import types
+        _shim_pkg = types.ModuleType("tflite_runtime")
+        _shim_pkg.__path__ = []
+        _shim_pkg.interpreter = _litert_interp
+        sys.modules["tflite_runtime"] = _shim_pkg
+        sys.modules["tflite_runtime.interpreter"] = _litert_interp
+    except ImportError:
+        pass  # neither tflite-runtime nor ai-edge-litert available; handled below
 
 try:
     from openwakeword.model import Model as _OWWModel
@@ -61,9 +80,12 @@ class WakeWordDetector:
                 openwakeword.utils.download_models()
             except Exception:
                 pass
+            # Pick inference framework based on model file extensions.
+            has_tflite = any(r.endswith(".tflite") for r in resolved)
+            framework = "tflite" if has_tflite else "onnx"
             self._model = _OWWModel(
                 wakeword_models=resolved,
-                inference_framework="onnx",
+                inference_framework=framework,
             )
             log.info("Wake-word models loaded: %s", list(self._model.models.keys()))
         except Exception as exc:

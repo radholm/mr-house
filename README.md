@@ -8,22 +8,31 @@ word ("Mr. House" / "House"), ask a question, and he answers back in a custom,
 effected voice — while a single static portrait glitches and flickers behind a
 CRT scanline shader.
 
-```
-  ┌──────────────┐   wake    ┌──────────┐   audio    ┌──────────────┐
-  │ openWakeWord │ ───────▶  │   STT    │ ─────────▶ │     Brain    │
-  │ (local)      │           │ (whisper)│            │ (Ollama+MCP) │
-  └──────────────┘           └──────────┘            └──────┬───────┘
-        ▲                                                   │ tokens (stream)
-        │                                                   ▼
-  ┌─────┴────────┐   FX     ┌──────────┐   speech   ┌──────────────┐
-  │   Speakers   │ ◀─────── │ pedalboard│ ◀──────── │     TTS      │
-  │              │          │ reverb/eq │           │   (Piper)    │
-  └──────────────┘          └──────────┘            └──────────────┘
+```mermaid
+flowchart LR
+    subgraph Input
+        WW[openWakeWord<br/>local]
+        STT[STT<br/>faster-whisper]
+    end
 
-        ┌───────────────────────────────────────────────┐
-        │  Display: static portrait + CRT/scanline/glitch │
-        │  GLSL shader (moderngl + pygame)                │
-        └───────────────────────────────────────────────┘
+    subgraph Brain
+        LLM[Ollama LLM<br/>+ tool loop]
+        Tools[Local & MCP Tools]
+    end
+
+    subgraph Output
+        TTS[TTS<br/>Piper]
+        FX[Voice FX<br/>pedalboard]
+        Speaker[Speakers]
+    end
+
+    subgraph Display
+        CRT[Portrait + CRT shader<br/>moderngl / pygame]
+    end
+
+    WW -- wake --> STT -- transcript --> LLM
+    LLM <--> Tools
+    LLM -- tokens stream --> TTS --> FX --> Speaker
 ```
 
 ## Features
@@ -42,6 +51,28 @@ CRT scanline shader.
   flicker and random glitch bursts via a GLSL fragment shader.
 - 🎚️ **Voice FX** — reverb, EQ, high/low-pass filters and distortion via
   Spotify's `pedalboard`.
+
+## Available tools
+
+Mr. House can call tools during a conversation to fetch real information. Tools
+are invoked automatically by the LLM when relevant.
+
+### Built-in (local) tools
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Look up factual information via Wikipedia (people, places, history, definitions). |
+| `get_weather` | Current conditions or multi-day forecast for any location (Open-Meteo, no API key). |
+| `get_time` | Returns the current local date and time. |
+| `get_self_info` | Authoritative facts about Mr. House's identity, history, and goals. |
+| `fallout_lore` | Look up Fallout / New Vegas lore from the Fallout wiki. |
+| `control_lights` | Control smart-home lights/scenes via macOS Shortcuts or webhooks (requires `home` config). |
+
+### MCP (Model Context Protocol) tools
+
+Any [MCP](https://modelcontextprotocol.io)-compatible server can be added under
+`mcp_servers` in `config.yaml`. Mr. House will discover the server's tools at
+startup and make them available to the LLM alongside the built-in ones.
 
 ## Quick start
 

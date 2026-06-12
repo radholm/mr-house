@@ -16,9 +16,8 @@ audio:
 wake_word:
   enabled: true
   # openWakeWord model names or paths to custom .onnx/.tflite models.
-  # Ship custom "mr_house"/"house" models here; falls back to bundled words.
   models:
-    - "hey_jarvis"          # placeholder until a custom "mr_house" model exists
+    - "src/mr_house/assets/voices/house_wake.tflite"          # placeholder until a custom "mr_house" model exists
   # Lower = more sensitive (easier to trigger) but more false wakes. Watch the
   # live "best wake score" in the logs (or `python run.py --mic-test`) to tune.
   threshold: 0.4
@@ -28,7 +27,7 @@ wake_word:
 # -------------------------------------------------------------------- vad
 # Used to detect the end of the user's utterance after wake.
 vad:
-  aggressiveness: 2         # 0..3 (webrtcvad); higher = more aggressive
+  aggressiveness: 3         # 0..3 (webrtcvad); higher = more aggressive
   silence_ms: 1000          # wait this long after you stop before answering
                             # (higher = more patient with pauses, but slower to
                             #  respond; lower = snappier. 800-1200 is a good range)
@@ -59,21 +58,21 @@ tts:
   enabled: true
   engine: "piper"
   # Path to a Piper voice (.onnx). The matching .onnx.json must sit beside it.
-  voice: "src/mr_house/assets/voices/en_US-ryan-high.onnx"
-  length_scale: 1.06        # <1 = faster speech; >1 = slower, more deliberate
+  voice: "src/mr_house/assets/voices/en_US-house-medium.onnx"
+  length_scale: 1.2        # <1 = faster speech; >1 = slower, more deliberate
   # Higher noise_scale = more pitch/prosody variation (less monotone, more emotion).
-  noise_scale: 0.85
+  noise_scale: 0.05
   # Higher noise_w = more varied phoneme timing/cadence (less mechanical rhythm).
-  noise_w: 0.95
+  noise_w: 0
   # Per-sentence random variation added to the above so consecutive sentences
   # aren't delivered with identical, flat prosody. 0 disables the jitter.
-  expressiveness: 0.12
+  expressiveness: 0
   # Seconds of pause inserted where an "..." appears, so he trails off naturally
   # (the sentence stays one continuous utterance). 0 disables.
-  ellipsis_pause: 0.35
+  ellipsis_pause: 0.2
   dash_pause: 0.2           # pause at dashes (— – or a spaced hyphen). 0 = off
-  comma_pause: 0.1          # extra pause at commas. 0 = leave to the voice
-  sentence_silence: 0.15    # seconds of silence between sentences
+  comma_pause: 0          # extra pause at commas. 0 = leave to the voice
+  sentence_silence: 0    # seconds of silence between sentences
 
 # --------------------------------------------------------------- voice FX
 # Applied to every synthesized chunk before playback (Spotify pedalboard).
@@ -110,7 +109,7 @@ brain:
   # Hard limit on tool-call iterations per question.
   max_tool_iterations: 4
   # Remember conversations across restarts (rolling window, saved to disk).
-  persist_memory: true
+  persist_memory: false
   memory_file: "data/memory.json"
 
 # ------------------------------------------------------------ conversation

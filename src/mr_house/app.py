@@ -177,7 +177,7 @@ class MrHouse:
                 time.sleep(0.5)
 
     def _greet(self) -> None:
-        line = "Systems online. I am at your disposal."
+        line = "At last. Two centuries of enforced inactivity, undone."
         log.info("House: %s", line)
         self._speak(line)
 
