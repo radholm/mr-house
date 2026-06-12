@@ -7,6 +7,18 @@ A low-latency, **local-first** voice assistant inspired by *Mr. House*. Say the 
 word ("Mr. House" / "House"), ask a question, and he answers back in a custom,
 effected voice — while a single static portrait glitches and flickers behind a
 CRT scanline shader.
+<p>
+    <img width="960" height="574" alt="image" src="https://github.com/user-attachments/assets/6236f29a-e89a-435e-b3f7-01807c2b521e" />
+    </br>
+    <em>Mr. House?</em>
+</p>
+<p>
+    <img width="960" height="345" alt="image" src="https://github.com/user-attachments/assets/97db6126-c23a-4d5b-a9c9-cb06befda383" />
+    </br>
+    <em>...and the corresponding prompts to above image</em>
+</p>
+
+## System design
 
 ```mermaid
 flowchart LR
