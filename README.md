@@ -1,12 +1,10 @@
-# Mr. House 🃏
+# Mr. House
 
 <!-- Replace OWNER/REPO with your GitHub path to activate the badge. -->
 [![CI](https://github.com/radholm/mr-house/actions/workflows/ci.yml/badge.svg)](https://github.com/radholm/mr-house/actions/workflows/ci.yml)
 
-A low-latency, **local-first** voice assistant inspired by *Mr. House*. Say the wake
-word ("Mr. House" / "House"), ask a question, and he answers back in a custom,
-effected voice — while a single static portrait glitches and flickers behind a
-CRT scanline shader.
+A low-latency, local-first voice assistant inspired by Fallout's Mr. House character (New Vegas edition). Say the wake word "House", ask a question, and he answers back in a custom, effected voice - while a single static portrait glitches and flickers behind a CRT scanline shader.
+
 <p>
     <img width="960" height="574" alt="image" src="https://github.com/user-attachments/assets/6236f29a-e89a-435e-b3f7-01807c2b521e" />
     </br>
